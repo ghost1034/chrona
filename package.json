@@ -1,0 +1,31 @@
+{
+  "name": "dayflow",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "main": "dist/main/app.cjs",
+  "scripts": {
+    "dev": "concurrently -k -n VITE,TSUP,ELECTRON \"vite\" \"tsup --watch\" \"wait-on tcp:5173 && cross-env DAYFLOW_DEV_SERVER_URL=http://localhost:5173 nodemon --watch dist/main --exec electron .\"",
+    "build": "tsup && vite build",
+    "start": "electron .",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.13.1",
+    "@types/react": "^19.0.10",
+    "@types/react-dom": "^19.0.4",
+    "@vitejs/plugin-react": "^4.3.4",
+    "concurrently": "^9.1.2",
+    "cross-env": "^7.0.3",
+    "electron": "^34.1.1",
+    "nodemon": "^3.1.9",
+    "tsup": "^8.3.6",
+    "typescript": "^5.7.3",
+    "vite": "^6.0.11",
+    "wait-on": "^8.0.2"
+  }
+}
