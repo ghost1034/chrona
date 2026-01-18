@@ -1,2 +1,18 @@
 reference/
 .DS_Store
+
+# Node/Electron
+node_modules/
+dist/
+.cache/
+.vite/
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Env
+.env
+.env.*
