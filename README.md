@@ -1,3 +1,3 @@
-# CPAAutomation Desktop (Hackathon)
+# Dayflow Cross-Platform
 
-Generates a timeline of your day based on screen captures. Useful for timesheets.
+Records your screen and generates a timeline of your activities.
