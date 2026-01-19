@@ -5,6 +5,7 @@ import { createMainWindow } from './window'
 import { registerIpc } from './ipc'
 import { SettingsStore } from './settings'
 import { createLogger } from './logger'
+import { StorageService } from './storage/storage'
 
 let quitting = false
 let mainWindow: BrowserWindow | null = null
@@ -35,6 +36,9 @@ async function main() {
   log.info('app.ready', { version: app.getVersion(), platform: process.platform })
 
   const settings = new SettingsStore({ userDataPath: app.getPath('userData') })
+  const storage = new StorageService({ userDataPath: app.getPath('userData') })
+  await storage.init()
+
   registerIpc({ settings })
 
   const win = await createMainWindow()
