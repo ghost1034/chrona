@@ -2,6 +2,7 @@ import fs from 'node:fs/promises'
 import path from 'node:path'
 import Database from 'better-sqlite3'
 import { migrate } from './schema'
+import { dayKeyFromUnixSeconds, formatClockAscii } from '../../shared/time'
 
 export type ScreenshotRow = {
   id: number
@@ -364,9 +365,9 @@ export class StorageService {
         `)
 
         for (const c of opts.newCards) {
-          const startDisplay = c.startDisplay ?? formatClock(c.startTs)
-          const endDisplay = c.endDisplay ?? formatClock(c.endTs)
-          const day = dayKey4am(c.startTs)
+          const startDisplay = c.startDisplay ?? formatClockAscii(c.startTs)
+          const endDisplay = c.endDisplay ?? formatClockAscii(c.endTs)
+          const day = dayKeyFromUnixSeconds(c.startTs)
           const info = insert.run(
             opts.batchId,
             startDisplay,
@@ -614,20 +615,4 @@ function pad2(n: number): string {
 
 function pad3(n: number): string {
   return String(n).padStart(3, '0')
-}
-
-function formatClock(ts: number): string {
-  const d = new Date(ts * 1000)
-  const fmt = new Intl.DateTimeFormat(undefined, {
-    hour: 'numeric',
-    minute: '2-digit',
-    hour12: true
-  })
-  return fmt.format(d)
-}
-
-function dayKey4am(ts: number): string {
-  const d = new Date(ts * 1000)
-  const adjusted = new Date(d.getTime() - 4 * 60 * 60 * 1000)
-  return `${adjusted.getFullYear()}-${pad2(adjusted.getMonth() + 1)}-${pad2(adjusted.getDate())}`
 }
