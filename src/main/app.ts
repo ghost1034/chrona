@@ -1,11 +1,13 @@
 import type { BrowserWindow } from 'electron'
-import { app } from 'electron'
+import { app, shell } from 'electron'
 import { createTray } from './tray'
 import { createMainWindow } from './window'
 import { registerIpc } from './ipc'
 import { SettingsStore } from './settings'
 import { createLogger } from './logger'
 import { StorageService } from './storage/storage'
+import { CaptureService } from './capture/capture'
+import { IPC_EVENTS } from '../shared/ipc'
 
 let quitting = false
 let mainWindow: BrowserWindow | null = null
@@ -34,15 +36,35 @@ async function main() {
 
   const log = createLogger({ userDataPath: app.getPath('userData') })
   log.info('app.ready', { version: app.getVersion(), platform: process.platform })
+  log.info('app.paths', { userData: app.getPath('userData') })
 
   const settings = new SettingsStore({ userDataPath: app.getPath('userData') })
   const storage = new StorageService({ userDataPath: app.getPath('userData') })
   await storage.init()
 
-  registerIpc({ settings })
-
   const win = await createMainWindow()
   mainWindow = win
+
+  let trayCtl: ReturnType<typeof createTray> | null = null
+
+  const capture = new CaptureService({
+    settings,
+    storage,
+    log,
+    events: {
+      recordingStateChanged: (state) => {
+        trayCtl?.updateMenu()
+        win.webContents.send(IPC_EVENTS.recordingStateChanged, state)
+      },
+      captureError: (payload) => {
+        trayCtl?.updateMenu()
+        win.webContents.send(IPC_EVENTS.captureError, payload)
+      }
+    }
+  })
+  await capture.init()
+
+  registerIpc({ settings, capture, storage })
 
   win.webContents.on('render-process-gone', (_event, details) => {
     log.error('renderer.gone', { reason: details.reason, exitCode: details.exitCode })
@@ -54,18 +76,28 @@ async function main() {
     win.hide()
   })
 
-  const tray = createTray({
+  trayCtl = createTray({
+    getCaptureState: () => capture.getState(),
+    onToggleRecording: (enabled) => {
+      void capture.setEnabled(enabled)
+    },
+    onOpenRecordingsFolder: () => {
+      const p = storage.resolveRelPath('recordings')
+      void shell.openPath(p)
+    },
     onOpen: () => {
       win.show()
       win.focus()
     },
     onQuit: () => {
       quitting = true
-      tray.destroy()
+      trayCtl?.tray.destroy()
       log.info('app.quit')
       app.quit()
     }
   })
+
+  trayCtl.updateMenu()
 
   app.on('activate', () => {
     if (!mainWindow) return
