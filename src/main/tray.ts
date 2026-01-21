@@ -1,29 +1,68 @@
 import { Menu, Tray, nativeImage } from 'electron'
+import type { CaptureState } from '../shared/ipc'
 
 export function createTray(opts: {
+  getCaptureState: () => CaptureState
+  onToggleRecording: (enabled: boolean) => void
+  onOpenRecordingsFolder: () => void
   onOpen: () => void
   onQuit: () => void
-}): Tray {
+}): { tray: Tray; updateMenu: () => void } {
   const tray = new Tray(getFallbackIcon())
   tray.setToolTip('Dayflow')
 
-  const menu = Menu.buildFromTemplate([
+  const updateMenu = () => {
+    const state = opts.getCaptureState()
+    tray.setContextMenu(Menu.buildFromTemplate(buildTemplate(state, opts)))
+  }
+
+  updateMenu()
+  tray.on('double-click', () => opts.onOpen())
+  tray.on('click', () => opts.onOpen())
+
+  return { tray, updateMenu }
+}
+
+function buildTemplate(
+  state: CaptureState,
+  opts: {
+    onToggleRecording: (enabled: boolean) => void
+    onOpenRecordingsFolder: () => void
+    onOpen: () => void
+    onQuit: () => void
+  }
+): Electron.MenuItemConstructorOptions[] {
+  const recordingLabel = state.desiredRecordingEnabled ? 'Stop Recording' : 'Start Recording'
+  const statusLabel = state.isSystemPaused
+    ? 'Status: System paused'
+    : state.desiredRecordingEnabled
+      ? 'Status: Recording'
+      : 'Status: Idle'
+
+  return [
+    {
+      label: recordingLabel,
+      click: () => opts.onToggleRecording(!state.desiredRecordingEnabled)
+    },
+    {
+      label: statusLabel,
+      enabled: false
+    },
+    { type: 'separator' },
     {
       label: 'Open Dayflow',
       click: () => opts.onOpen()
+    },
+    {
+      label: 'Open Recordings Folder',
+      click: () => opts.onOpenRecordingsFolder()
     },
     { type: 'separator' },
     {
       label: 'Quit',
       click: () => opts.onQuit()
     }
-  ])
-
-  tray.setContextMenu(menu)
-  tray.on('double-click', () => opts.onOpen())
-  tray.on('click', () => opts.onOpen())
-
-  return tray
+  ]
 }
 
 function getFallbackIcon() {
