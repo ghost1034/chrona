@@ -1,5 +1,6 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import type { IpcContract } from '../shared/ipc'
+import { IPC_EVENTS } from '../shared/ipc'
 
 type Invoke = <K extends keyof IpcContract>(
   channel: K,
@@ -12,7 +13,27 @@ contextBridge.exposeInMainWorld('chrona', {
   ping: () => invoke('app:ping', undefined),
   getSettings: () => invoke('settings:getAll', undefined),
   updateSettings: (patch: IpcContract['settings:update']['req']) =>
-    invoke('settings:update', patch)
+    invoke('settings:update', patch),
+
+  getCaptureState: () => invoke('capture:getState', undefined),
+  setRecordingEnabled: (enabled: boolean) => invoke('capture:setEnabled', { enabled }),
+  setCaptureInterval: (intervalSeconds: number) =>
+    invoke('capture:setInterval', { intervalSeconds }),
+  setSelectedDisplay: (displayId: string | null) =>
+    invoke('capture:setSelectedDisplay', { displayId }),
+  listDisplays: () => invoke('capture:listDisplays', undefined),
+  openRecordingsFolder: () => invoke('debug:openRecordingsFolder', undefined),
+
+  onRecordingStateChanged: (cb: (state: IpcContract['capture:getState']['res']) => void) => {
+    const listener = (_event: unknown, payload: IpcContract['capture:getState']['res']) => cb(payload)
+    ipcRenderer.on(IPC_EVENTS.recordingStateChanged, listener)
+    return () => ipcRenderer.removeListener(IPC_EVENTS.recordingStateChanged, listener)
+  },
+  onCaptureError: (cb: (err: { message: string }) => void) => {
+    const listener = (_event: unknown, payload: { message: string }) => cb(payload)
+    ipcRenderer.on(IPC_EVENTS.captureError, listener)
+    return () => ipcRenderer.removeListener(IPC_EVENTS.captureError, listener)
+  }
 })
 
 type InvokeResult<K extends keyof IpcContract> = Promise<IpcContract[K]['res']>
@@ -22,4 +43,16 @@ export type ChronaApi = {
   getSettings: () => InvokeResult<'settings:getAll'>
   updateSettings: (patch: IpcContract['settings:update']['req']) =>
     InvokeResult<'settings:update'>
+
+  getCaptureState: () => InvokeResult<'capture:getState'>
+  setRecordingEnabled: (enabled: boolean) => InvokeResult<'capture:setEnabled'>
+  setCaptureInterval: (intervalSeconds: number) => InvokeResult<'capture:setInterval'>
+  setSelectedDisplay: (displayId: string | null) => InvokeResult<'capture:setSelectedDisplay'>
+  listDisplays: () => InvokeResult<'capture:listDisplays'>
+  openRecordingsFolder: () => InvokeResult<'debug:openRecordingsFolder'>
+
+  onRecordingStateChanged: (
+    cb: (state: IpcContract['capture:getState']['res']) => void
+  ) => () => void
+  onCaptureError: (cb: (err: { message: string }) => void) => () => void
 }
