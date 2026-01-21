@@ -3,12 +3,44 @@ import { useEffect, useState } from 'react'
 export function App() {
   const [ping, setPing] = useState<string>('')
   const [interval, setInterval] = useState<number | null>(null)
+  const [recording, setRecording] = useState<boolean>(false)
+  const [systemPaused, setSystemPaused] = useState<boolean>(false)
+  const [statusLine, setStatusLine] = useState<string>('')
+  const [lastError, setLastError] = useState<string | null>(null)
+  const [displays, setDisplays] = useState<Array<{ id: string; bounds: any; scaleFactor: number }>>([])
+  const [selectedDisplayId, setSelectedDisplayId] = useState<string | null>(null)
 
   useEffect(() => {
     void (async () => {
-      const settings = await window.chrona.getSettings()
-      setInterval(settings.captureIntervalSeconds)
+      const state = await window.chrona.getCaptureState()
+      setInterval(state.intervalSeconds)
+      setRecording(state.desiredRecordingEnabled)
+      setSystemPaused(state.isSystemPaused)
+      setLastError(state.lastError)
+      setSelectedDisplayId(state.selectedDisplayId)
+      setStatusLine(formatStatus(state))
+
+      const ds = await window.chrona.listDisplays()
+      setDisplays(ds)
     })()
+
+    const unsubState = window.chrona.onRecordingStateChanged((state) => {
+      setInterval(state.intervalSeconds)
+      setRecording(state.desiredRecordingEnabled)
+      setSystemPaused(state.isSystemPaused)
+      setLastError(state.lastError)
+      setSelectedDisplayId(state.selectedDisplayId)
+      setStatusLine(formatStatus(state))
+    })
+
+    const unsubErr = window.chrona.onCaptureError((err) => {
+      setLastError(err.message)
+    })
+
+    return () => {
+      unsubState()
+      unsubErr()
+    }
   }, [])
 
   async function onPing() {
@@ -18,8 +50,21 @@ export function App() {
 
   async function onSaveInterval() {
     if (interval === null || !Number.isFinite(interval) || interval <= 0) return
-    const next = await window.chrona.updateSettings({ captureIntervalSeconds: interval })
-    setInterval(next.captureIntervalSeconds)
+    const next = await window.chrona.setCaptureInterval(interval)
+    setInterval(next.intervalSeconds)
+  }
+
+  async function onSelectDisplay(id: string) {
+    const displayId = id === 'auto' ? null : id
+    setSelectedDisplayId(displayId)
+    await window.chrona.setSelectedDisplay(displayId)
+  }
+
+  async function onToggleRecording() {
+    const next = await window.chrona.setRecordingEnabled(!recording)
+    setRecording(next.desiredRecordingEnabled)
+    setSystemPaused(next.isSystemPaused)
+    setStatusLine(formatStatus(next))
   }
 
   return (
@@ -40,6 +85,13 @@ export function App() {
         </section>
 
         <section className="row">
+          <button className="btn btn-accent" onClick={onToggleRecording}>
+            {recording ? 'Stop recording' : 'Start recording'}
+          </button>
+          <div className="mono">{statusLine}</div>
+        </section>
+
+        <section className="row">
           <label className="label">
             Screenshot interval (seconds)
             <input
@@ -54,8 +106,59 @@ export function App() {
           <button className="btn" onClick={onSaveInterval}>
             Save
           </button>
+          <button className="btn" onClick={() => void window.chrona.openRecordingsFolder()}>
+            Open recordings
+          </button>
         </section>
+
+        <section className="row">
+          <label className="label">
+            Capture display
+            <select
+              className="input"
+              value={selectedDisplayId ?? 'auto'}
+              onChange={(e) => void onSelectDisplay(e.target.value)}
+            >
+              <option value="auto">Auto (cursor)</option>
+              {displays.map((d) => (
+                <option key={d.id} value={d.id}>
+                  Display {d.id} ({d.bounds.width}x{d.bounds.height} @ {d.scaleFactor}x)
+                </option>
+              ))}
+            </select>
+          </label>
+        </section>
+
+        {systemPaused ? (
+          <section className="row">
+            <div className="pill">System paused (sleep/lock)</div>
+          </section>
+        ) : null}
+
+        {lastError ? (
+          <section className="row">
+            <div className="mono error">Last capture error: {lastError}</div>
+          </section>
+        ) : null}
       </main>
     </div>
   )
+}
+
+function formatStatus(state: {
+  desiredRecordingEnabled: boolean
+  isSystemPaused: boolean
+  lastCaptureTs: number | null
+  resolvedDisplayId: string | null
+}) {
+  const base = state.isSystemPaused
+    ? 'System paused'
+    : state.desiredRecordingEnabled
+      ? 'Recording'
+      : 'Idle'
+
+  const parts: string[] = [base]
+  if (state.resolvedDisplayId) parts.push(`display=${state.resolvedDisplayId}`)
+  if (state.lastCaptureTs) parts.push(`last=${new Date(state.lastCaptureTs * 1000).toLocaleTimeString()}`)
+  return parts.join(' · ')
 }
