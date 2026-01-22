@@ -4,6 +4,7 @@ import { SettingsStore } from './settings'
 import type { CaptureService } from './capture/capture'
 import type { StorageService } from './storage/storage'
 import { shell } from 'electron'
+import type { AnalysisService } from './analysis/analysis'
 
 type Handler<K extends keyof IpcContract> = (
   req: IpcContract[K]['req']
@@ -13,6 +14,7 @@ export function registerIpc(opts: {
   settings: SettingsStore
   capture: CaptureService
   storage: StorageService
+  analysis: AnalysisService
 }) {
   handle('app:ping', async () => ({ ok: true, nowTs: Math.floor(Date.now() / 1000) }))
   handle('settings:getAll', async () => opts.settings.getAll())
@@ -29,6 +31,12 @@ export function registerIpc(opts: {
     await shell.openPath(p)
     return { ok: true }
   })
+
+  // Phase 5 debug helpers
+  handle('analysis:runTick', async () => opts.analysis.runTickNow())
+  handle('analysis:getRecentBatches', async (req) =>
+    opts.storage.fetchRecentBatches(req?.limit ?? 25)
+  )
 }
 
 function handle<K extends keyof IpcContract>(channel: K, fn: Handler<K>) {
