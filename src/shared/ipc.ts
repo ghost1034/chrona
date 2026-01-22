@@ -62,6 +62,23 @@ export type IpcContract = {
     req: void
     res: { ok: true }
   }
+
+  // Phase 5 debug helpers
+  'analysis:runTick': {
+    req: void
+    res: { createdBatchIds: number[]; unprocessedCount: number }
+  }
+  'analysis:getRecentBatches': {
+    req: { limit: number }
+    res: Array<{
+      id: number
+      batchStartTs: number
+      batchEndTs: number
+      status: string
+      reason: string | null
+      createdAt: string
+    }>
+  }
 }
 
 export const IPC_CHANNELS = {
@@ -73,12 +90,15 @@ export const IPC_CHANNELS = {
   captureSetInterval: 'capture:setInterval',
   captureSetSelectedDisplay: 'capture:setSelectedDisplay',
   captureListDisplays: 'capture:listDisplays',
-  debugOpenRecordingsFolder: 'debug:openRecordingsFolder'
+  debugOpenRecordingsFolder: 'debug:openRecordingsFolder',
+  analysisRunTick: 'analysis:runTick',
+  analysisGetRecentBatches: 'analysis:getRecentBatches'
 } as const
 
 export const IPC_EVENTS = {
   recordingStateChanged: 'event:recordingStateChanged',
-  captureError: 'event:captureError'
+  captureError: 'event:captureError',
+  analysisBatchUpdated: 'event:analysisBatchUpdated'
 } as const
 
 export type IpcChannel = IpcContractKey

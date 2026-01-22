@@ -9,6 +9,7 @@ export function App() {
   const [lastError, setLastError] = useState<string | null>(null)
   const [displays, setDisplays] = useState<Array<{ id: string; bounds: any; scaleFactor: number }>>([])
   const [selectedDisplayId, setSelectedDisplayId] = useState<string | null>(null)
+  const [analysisLine, setAnalysisLine] = useState<string>('')
 
   useEffect(() => {
     void (async () => {
@@ -37,9 +38,14 @@ export function App() {
       setLastError(err.message)
     })
 
+    const unsubAnalysis = window.chrona.onAnalysisBatchUpdated((p) => {
+      setAnalysisLine(`batch ${p.batchId}: ${p.status}${p.reason ? ` (${p.reason})` : ''}`)
+    })
+
     return () => {
       unsubState()
       unsubErr()
+      unsubAnalysis()
     }
   }, [])
 
@@ -58,6 +64,11 @@ export function App() {
     const displayId = id === 'auto' ? null : id
     setSelectedDisplayId(displayId)
     await window.chrona.setSelectedDisplay(displayId)
+  }
+
+  async function onRunAnalysisTick() {
+    const res = await window.chrona.runAnalysisTick()
+    setAnalysisLine(`tick: created=${res.createdBatchIds.length} unprocessed=${res.unprocessedCount}`)
   }
 
   async function onToggleRecording() {
@@ -109,7 +120,16 @@ export function App() {
           <button className="btn" onClick={() => void window.chrona.openRecordingsFolder()}>
             Open recordings
           </button>
+          <button className="btn" onClick={() => void onRunAnalysisTick()}>
+            Run analysis tick
+          </button>
         </section>
+
+        {analysisLine ? (
+          <section className="row">
+            <div className="mono">{analysisLine}</div>
+          </section>
+        ) : null}
 
         <section className="row">
           <label className="label">
