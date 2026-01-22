@@ -8,6 +8,7 @@ import { createLogger } from './logger'
 import { StorageService } from './storage/storage'
 import { CaptureService } from './capture/capture'
 import { IPC_EVENTS } from '../shared/ipc'
+import { AnalysisService } from './analysis/analysis'
 
 let quitting = false
 let mainWindow: BrowserWindow | null = null
@@ -64,7 +65,18 @@ async function main() {
   })
   await capture.init()
 
-  registerIpc({ settings, capture, storage })
+  const analysis = new AnalysisService({
+    storage,
+    log,
+    events: {
+      analysisBatchUpdated: (payload) => {
+        win.webContents.send(IPC_EVENTS.analysisBatchUpdated, payload)
+      }
+    }
+  })
+  analysis.start()
+
+  registerIpc({ settings, capture, storage, analysis })
 
   win.webContents.on('render-process-gone', (_event, details) => {
     log.error('renderer.gone', { reason: details.reason, exitCode: details.exitCode })

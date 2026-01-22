@@ -23,5 +23,16 @@ export default defineConfig([
     clean: false,
     dts: false,
     splitting: false
+  },
+  {
+    entry: ['src/tools/analysis-smoke.ts'],
+    outDir: 'dist/tools',
+    format: ['cjs'],
+    platform: 'node',
+    target: 'node18',
+    sourcemap: true,
+    clean: false,
+    dts: false,
+    splitting: false
   }
 ])
