@@ -203,6 +203,30 @@ export class StorageService {
     })
   }
 
+  async fetchRecentBatches(limit: number): Promise<AnalysisBatchRow[]> {
+    const safeLimit = Math.max(1, Math.min(200, Math.floor(limit)))
+    return this.enqueue(() => {
+      const db = this.mustDb()
+      const rows = db
+        .prepare(
+          `SELECT id, batch_start_ts, batch_end_ts, status, reason, created_at
+           FROM analysis_batches
+           ORDER BY id DESC
+           LIMIT ?`
+        )
+        .all(safeLimit) as any[]
+
+      return rows.map((row) => ({
+        id: row.id,
+        batchStartTs: row.batch_start_ts,
+        batchEndTs: row.batch_end_ts,
+        status: row.status,
+        reason: row.reason ?? null,
+        createdAt: row.created_at
+      }))
+    })
+  }
+
   async getBatchScreenshots(batchId: number): Promise<ScreenshotRow[]> {
     return this.enqueue(() => {
       const db = this.mustDb()

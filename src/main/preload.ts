@@ -24,6 +24,9 @@ contextBridge.exposeInMainWorld('dayflow', {
   listDisplays: () => invoke('capture:listDisplays', undefined),
   openRecordingsFolder: () => invoke('debug:openRecordingsFolder', undefined),
 
+  runAnalysisTick: () => invoke('analysis:runTick', undefined),
+  getRecentBatches: (limit: number) => invoke('analysis:getRecentBatches', { limit }),
+
   onRecordingStateChanged: (cb: (state: IpcContract['capture:getState']['res']) => void) => {
     const listener = (_event: unknown, payload: IpcContract['capture:getState']['res']) => cb(payload)
     ipcRenderer.on(IPC_EVENTS.recordingStateChanged, listener)
@@ -33,6 +36,17 @@ contextBridge.exposeInMainWorld('dayflow', {
     const listener = (_event: unknown, payload: { message: string }) => cb(payload)
     ipcRenderer.on(IPC_EVENTS.captureError, listener)
     return () => ipcRenderer.removeListener(IPC_EVENTS.captureError, listener)
+  },
+
+  onAnalysisBatchUpdated: (
+    cb: (payload: { batchId: number; status: string; reason?: string | null }) => void
+  ) => {
+    const listener = (
+      _event: unknown,
+      payload: { batchId: number; status: string; reason?: string | null }
+    ) => cb(payload)
+    ipcRenderer.on(IPC_EVENTS.analysisBatchUpdated, listener)
+    return () => ipcRenderer.removeListener(IPC_EVENTS.analysisBatchUpdated, listener)
   }
 })
 
@@ -51,8 +65,15 @@ export type DayflowApi = {
   listDisplays: () => InvokeResult<'capture:listDisplays'>
   openRecordingsFolder: () => InvokeResult<'debug:openRecordingsFolder'>
 
+  runAnalysisTick: () => InvokeResult<'analysis:runTick'>
+  getRecentBatches: (limit: number) => InvokeResult<'analysis:getRecentBatches'>
+
   onRecordingStateChanged: (
     cb: (state: IpcContract['capture:getState']['res']) => void
   ) => () => void
   onCaptureError: (cb: (err: { message: string }) => void) => () => void
+
+  onAnalysisBatchUpdated: (
+    cb: (payload: { batchId: number; status: string; reason?: string | null }) => void
+  ) => () => void
 }
