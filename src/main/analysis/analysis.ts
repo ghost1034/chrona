@@ -1,6 +1,9 @@
 import type { Logger } from '../logger'
 import type { StorageService } from '../storage/storage'
 import { createScreenshotBatches } from '../../shared/batching'
+import { GeminiService } from '../gemini/gemini'
+import type { SettingsStore } from '../settings'
+import { getGeminiApiKey } from '../gemini/keychain'
 
 type Events = {
   analysisBatchUpdated: (payload: { batchId: number; status: string; reason?: string | null }) => void
@@ -10,6 +13,7 @@ export class AnalysisService {
   private readonly storage: StorageService
   private readonly log: Logger
   private readonly events: Events
+  private readonly settings: SettingsStore
 
   private timer: NodeJS.Timeout | null = null
   private tickInFlight: Promise<{ createdBatchIds: number[]; unprocessedCount: number }> | null =
@@ -22,16 +26,23 @@ export class AnalysisService {
   private readonly maxGapSec = 5 * 60
   private readonly minBatchDurationSec = 5 * 60
 
-  constructor(opts: { storage: StorageService; log: Logger; events: Events }) {
+  private processingInFlight = false
+  private processingBatchId: number | null = null
+  private readonly gemini: GeminiService
+
+  constructor(opts: { storage: StorageService; log: Logger; events: Events; settings: SettingsStore }) {
     this.storage = opts.storage
     this.log = opts.log
     this.events = opts.events
+    this.settings = opts.settings
+    this.gemini = new GeminiService({ storage: opts.storage, log: opts.log })
   }
 
   start() {
     if (this.timer) return
     this.log.info('analysis.start', { checkIntervalMs: this.checkIntervalMs })
     void this.runTickNow()
+    void this.drainPendingBatches()
     this.timer = setInterval(() => {
       void this.runTickNow()
     }, this.checkIntervalMs)
@@ -122,6 +133,93 @@ export class AnalysisService {
       createdBatches: createdBatchIds.length
     })
 
+    // After creating batches, try processing pending ones.
+    await this.drainPendingBatches()
+
     return { createdBatchIds, unprocessedCount }
+  }
+
+  private async drainPendingBatches(): Promise<void> {
+    if (this.processingInFlight) return
+
+    const apiKey = await getGeminiApiKey()
+    if (!apiKey && !process.env.DAYFLOW_GEMINI_MOCK) {
+      // Leave batches as pending; user can add a key later.
+      this.log.warn('analysis.geminiKeyMissing')
+      return
+    }
+
+    this.processingInFlight = true
+    try {
+      while (true) {
+        const batch = await this.storage.fetchNextBatchByStatus('pending')
+        if (!batch) return
+        this.processingBatchId = batch.id
+
+        const screenshots = await this.storage.getBatchScreenshots(batch.id)
+        if (screenshots.length === 0) {
+          await this.storage.setBatchStatus({
+            batchId: batch.id,
+            status: 'failed_empty',
+            reason: 'empty'
+          })
+          this.events.analysisBatchUpdated({
+            batchId: batch.id,
+            status: 'failed_empty',
+            reason: 'empty'
+          })
+          this.processingBatchId = null
+          continue
+        }
+
+        await this.storage.setBatchStatus({
+          batchId: batch.id,
+          status: 'processing_transcribe',
+          reason: null
+        })
+        this.events.analysisBatchUpdated({ batchId: batch.id, status: 'processing_transcribe' })
+
+        const relPaths = screenshots.map((s) => s.filePath)
+        const intervalSeconds = (await this.settings.getAll()).captureIntervalSeconds
+        const res = await this.gemini.transcribeBatch({
+          batchId: batch.id,
+          batchStartTs: batch.batchStartTs,
+          batchEndTs: batch.batchEndTs,
+          screenshotRelPaths: relPaths,
+          screenshotIntervalSeconds: intervalSeconds
+        })
+
+        await this.storage.setBatchStatus({
+          batchId: batch.id,
+          status: 'transcribed',
+          reason: `observations=${res.observationsInserted}`
+        })
+        this.events.analysisBatchUpdated({
+          batchId: batch.id,
+          status: 'transcribed',
+          reason: `observations=${res.observationsInserted}`
+        })
+
+        this.processingBatchId = null
+      }
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e)
+      this.log.error('analysis.transcribeFailed', { message })
+      if (this.processingBatchId) {
+        await this.storage.setBatchStatus({
+          batchId: this.processingBatchId,
+          status: 'failed',
+          reason: message
+        })
+        this.events.analysisBatchUpdated({
+          batchId: this.processingBatchId,
+          status: 'failed',
+          reason: message
+        })
+      }
+    } finally {
+      this.processingBatchId = null
+      this.processingInFlight = false
+    }
   }
 }

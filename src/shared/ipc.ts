@@ -79,6 +79,15 @@ export type IpcContract = {
       createdAt: string
     }>
   }
+
+  'gemini:setApiKey': {
+    req: { apiKey: string }
+    res: { ok: true }
+  }
+  'gemini:hasApiKey': {
+    req: void
+    res: { hasApiKey: boolean }
+  }
 }
 
 export const IPC_CHANNELS = {
@@ -92,7 +101,9 @@ export const IPC_CHANNELS = {
   captureListDisplays: 'capture:listDisplays',
   debugOpenRecordingsFolder: 'debug:openRecordingsFolder',
   analysisRunTick: 'analysis:runTick',
-  analysisGetRecentBatches: 'analysis:getRecentBatches'
+  analysisGetRecentBatches: 'analysis:getRecentBatches',
+  geminiSetApiKey: 'gemini:setApiKey',
+  geminiHasApiKey: 'gemini:hasApiKey'
 } as const
 
 export const IPC_EVENTS = {

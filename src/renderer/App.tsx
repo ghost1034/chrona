@@ -10,6 +10,8 @@ export function App() {
   const [displays, setDisplays] = useState<Array<{ id: string; bounds: any; scaleFactor: number }>>([])
   const [selectedDisplayId, setSelectedDisplayId] = useState<string | null>(null)
   const [analysisLine, setAnalysisLine] = useState<string>('')
+  const [hasGeminiKey, setHasGeminiKey] = useState<boolean | null>(null)
+  const [geminiKeyInput, setGeminiKeyInput] = useState<string>('')
 
   useEffect(() => {
     void (async () => {
@@ -23,6 +25,9 @@ export function App() {
 
       const ds = await window.dayflow.listDisplays()
       setDisplays(ds)
+
+      const hk = await window.dayflow.hasGeminiApiKey()
+      setHasGeminiKey(hk.hasApiKey)
     })()
 
     const unsubState = window.dayflow.onRecordingStateChanged((state) => {
@@ -69,6 +74,14 @@ export function App() {
   async function onRunAnalysisTick() {
     const res = await window.dayflow.runAnalysisTick()
     setAnalysisLine(`tick: created=${res.createdBatchIds.length} unprocessed=${res.unprocessedCount}`)
+  }
+
+  async function onSaveGeminiKey() {
+    if (!geminiKeyInput.trim()) return
+    await window.dayflow.setGeminiApiKey(geminiKeyInput)
+    setGeminiKeyInput('')
+    const hk = await window.dayflow.hasGeminiApiKey()
+    setHasGeminiKey(hk.hasApiKey)
   }
 
   async function onToggleRecording() {
@@ -122,6 +135,28 @@ export function App() {
           </button>
           <button className="btn" onClick={() => void onRunAnalysisTick()}>
             Run analysis tick
+          </button>
+        </section>
+
+        <section className="row">
+          <div className="mono">
+            Gemini key: {hasGeminiKey === null ? '...' : hasGeminiKey ? 'configured' : 'missing'}
+          </div>
+        </section>
+
+        <section className="row">
+          <label className="label">
+            Set Gemini API key
+            <input
+              className="input"
+              type="password"
+              value={geminiKeyInput}
+              placeholder="AIza..."
+              onChange={(e) => setGeminiKeyInput(e.target.value)}
+            />
+          </label>
+          <button className="btn" onClick={() => void onSaveGeminiKey()}>
+            Save key
           </button>
         </section>
 

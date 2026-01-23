@@ -3,12 +3,14 @@ import os from 'node:os'
 import { createLogger } from '../main/logger'
 import { StorageService } from '../main/storage/storage'
 import { AnalysisService } from '../main/analysis/analysis'
+import { SettingsStore } from '../main/settings'
 
 async function main() {
   const baseDir =
     process.env.DAYFLOW_SMOKE_DIR ?? path.join(os.tmpdir(), `dayflow-analysis-smoke-${process.pid}`)
 
   const log = createLogger({ userDataPath: baseDir })
+  const settings = new SettingsStore({ userDataPath: baseDir })
   const storage = new StorageService({ userDataPath: baseDir })
   await storage.init()
 
@@ -35,7 +37,8 @@ async function main() {
     log,
     events: {
       analysisBatchUpdated: () => {}
-    }
+    },
+    settings
   })
 
   const before = await storage.fetchUnprocessedScreenshots({
