@@ -27,6 +27,9 @@ contextBridge.exposeInMainWorld('chrona', {
   runAnalysisTick: () => invoke('analysis:runTick', undefined),
   getRecentBatches: (limit: number) => invoke('analysis:getRecentBatches', { limit }),
 
+  setGeminiApiKey: (apiKey: string) => invoke('gemini:setApiKey', { apiKey }),
+  hasGeminiApiKey: () => invoke('gemini:hasApiKey', undefined),
+
   onRecordingStateChanged: (cb: (state: IpcContract['capture:getState']['res']) => void) => {
     const listener = (_event: unknown, payload: IpcContract['capture:getState']['res']) => cb(payload)
     ipcRenderer.on(IPC_EVENTS.recordingStateChanged, listener)
@@ -67,6 +70,9 @@ export type ChronaApi = {
 
   runAnalysisTick: () => InvokeResult<'analysis:runTick'>
   getRecentBatches: (limit: number) => InvokeResult<'analysis:getRecentBatches'>
+
+  setGeminiApiKey: (apiKey: string) => InvokeResult<'gemini:setApiKey'>
+  hasGeminiApiKey: () => InvokeResult<'gemini:hasApiKey'>
 
   onRecordingStateChanged: (
     cb: (state: IpcContract['capture:getState']['res']) => void
