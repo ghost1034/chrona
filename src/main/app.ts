@@ -72,7 +72,8 @@ async function main() {
       analysisBatchUpdated: (payload) => {
         win.webContents.send(IPC_EVENTS.analysisBatchUpdated, payload)
       }
-    }
+    },
+    settings
   })
   analysis.start()
 
