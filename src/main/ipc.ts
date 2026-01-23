@@ -5,6 +5,7 @@ import type { CaptureService } from './capture/capture'
 import type { StorageService } from './storage/storage'
 import { shell } from 'electron'
 import type { AnalysisService } from './analysis/analysis'
+import { getGeminiApiKey, setGeminiApiKey } from './gemini/keychain'
 
 type Handler<K extends keyof IpcContract> = (
   req: IpcContract[K]['req']
@@ -37,6 +38,15 @@ export function registerIpc(opts: {
   handle('analysis:getRecentBatches', async (req) =>
     opts.storage.fetchRecentBatches(req?.limit ?? 25)
   )
+
+  handle('gemini:setApiKey', async (req) => {
+    await setGeminiApiKey(req.apiKey)
+    return { ok: true }
+  })
+  handle('gemini:hasApiKey', async () => {
+    const k = await getGeminiApiKey()
+    return { hasApiKey: !!k }
+  })
 }
 
 function handle<K extends keyof IpcContract>(channel: K, fn: Handler<K>) {
