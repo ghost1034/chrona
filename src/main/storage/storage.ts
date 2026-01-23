@@ -227,6 +227,30 @@ export class StorageService {
     })
   }
 
+  async fetchNextBatchByStatus(status: string): Promise<AnalysisBatchRow | null> {
+    return this.enqueue(() => {
+      const db = this.mustDb()
+      const row = db
+        .prepare(
+          `SELECT id, batch_start_ts, batch_end_ts, status, reason, created_at
+           FROM analysis_batches
+           WHERE status = ?
+           ORDER BY id ASC
+           LIMIT 1`
+        )
+        .get(status) as any
+      if (!row) return null
+      return {
+        id: row.id,
+        batchStartTs: row.batch_start_ts,
+        batchEndTs: row.batch_end_ts,
+        status: row.status,
+        reason: row.reason ?? null,
+        createdAt: row.created_at
+      }
+    })
+  }
+
   async getBatchScreenshots(batchId: number): Promise<ScreenshotRow[]> {
     return this.enqueue(() => {
       const db = this.mustDb()
@@ -495,6 +519,61 @@ export class StorageService {
       const db = this.mustDb()
       const placeholders = ids.map(() => '?').join(',')
       db.prepare(`UPDATE screenshots SET is_deleted = 1 WHERE id IN (${placeholders})`).run(...ids)
+    })
+  }
+
+  async insertLLMCall(opts: {
+    batchId?: number | null
+    callGroupId?: string | null
+    attempt?: number
+    provider: string
+    model?: string | null
+    operation: string
+    status: 'success' | 'failure'
+    latencyMs?: number | null
+    httpStatus?: number | null
+    requestMethod?: string | null
+    requestUrl?: string | null
+    requestHeaders?: string | null
+    requestBody?: string | null
+    responseHeaders?: string | null
+    responseBody?: string | null
+    errorDomain?: string | null
+    errorCode?: number | null
+    errorMessage?: string | null
+  }): Promise<number> {
+    return this.enqueue(() => {
+      const db = this.mustDb()
+      const stmt = db.prepare(`
+        INSERT INTO llm_calls (
+          batch_id, call_group_id, attempt, provider, model, operation, status,
+          latency_ms, http_status, request_method, request_url,
+          request_headers, request_body, response_headers, response_body,
+          error_domain, error_code, error_message
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `)
+
+      const info = stmt.run(
+        opts.batchId ?? null,
+        opts.callGroupId ?? null,
+        opts.attempt ?? 1,
+        opts.provider,
+        opts.model ?? null,
+        opts.operation,
+        opts.status,
+        opts.latencyMs ?? null,
+        opts.httpStatus ?? null,
+        opts.requestMethod ?? null,
+        opts.requestUrl ?? null,
+        opts.requestHeaders ?? null,
+        opts.requestBody ?? null,
+        opts.responseHeaders ?? null,
+        opts.responseBody ?? null,
+        opts.errorDomain ?? null,
+        opts.errorCode ?? null,
+        opts.errorMessage ?? null
+      )
+      return Number(info.lastInsertRowid)
     })
   }
 
