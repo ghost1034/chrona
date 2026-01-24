@@ -4,6 +4,7 @@ import { createLogger } from '../main/logger'
 import { StorageService } from '../main/storage/storage'
 import { AnalysisService } from '../main/analysis/analysis'
 import { SettingsStore } from '../main/settings'
+import { dayKeyFromUnixSeconds } from '../shared/time'
 
 async function main() {
   const baseDir =
@@ -50,6 +51,9 @@ async function main() {
   })
   const recent = await storage.fetchRecentBatches(10)
 
+  const firstBatch = recent[recent.length - 1]
+  const cards = firstBatch ? await storage.fetchCardsForDay(dayKeyFromUnixSeconds(firstBatch.batchStartTs)) : []
+
   // eslint-disable-next-line no-console
   console.log(
     JSON.stringify(
@@ -58,7 +62,8 @@ async function main() {
         beforeUnprocessedCount: before.length,
         tick: res,
         afterUnprocessedCount: after.length,
-        recentBatches: recent
+        recentBatches: recent,
+        cardsCount: cards.length
       },
       null,
       2
