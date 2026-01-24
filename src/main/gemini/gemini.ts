@@ -6,6 +6,7 @@ import type { Logger } from '../logger'
 import type { StorageService } from '../storage/storage'
 import { buildCompressedTimelineVideo } from './video'
 import { parseAndExpandTranscriptionJson } from './transcription'
+import { parseAndValidateCardsJson, stripCodeFences } from './cards'
 
 export type GeminiConfig = {
   model: string
@@ -152,6 +153,139 @@ export class GeminiService {
     }
   }
 
+  async generateCards(opts: {
+    batchId: number
+    windowStartTs: number
+    windowEndTs: number
+    observations: Array<{ startTs: number; endTs: number; observation: string }>
+    contextCards: Array<{
+      startTs: number
+      endTs: number
+      category: string
+      title: string
+      summary?: string | null
+    }>
+  }): Promise<{
+    cards: Array<{
+      startTs: number
+      endTs: number
+      category: string
+      subcategory?: string | null
+      title: string
+      summary?: string | null
+      detailedSummary?: string | null
+      metadata?: string | null
+    }>
+  }> {
+    const apiKey = await getGeminiApiKey()
+    if (!apiKey && !process.env.DAYFLOW_GEMINI_MOCK) {
+      throw new Error('Missing Gemini API key (set DAYFLOW_GEMINI_API_KEY or store via keychain)')
+    }
+
+    if (process.env.DAYFLOW_GEMINI_MOCK) {
+      const mockJson = JSON.stringify({
+        cards: [
+          {
+            startTs: opts.windowStartTs,
+            endTs: Math.min(opts.windowEndTs, opts.windowStartTs + 15 * 60),
+            category: 'Work',
+            subcategory: 'Mock',
+            title: 'Mock activity',
+            summary: 'Mock card generation result.'
+          }
+        ]
+      })
+
+      const parsed = parseAndValidateCardsJson({
+        jsonText: mockJson,
+        windowStartTs: opts.windowStartTs,
+        windowEndTs: opts.windowEndTs
+      })
+
+      return {
+        cards: parsed.cards.map((c) => ({
+          startTs: c.startTs,
+          endTs: c.endTs,
+          category: c.category,
+          subcategory: c.subcategory ?? null,
+          title: c.title,
+          summary: c.summary ?? null,
+          detailedSummary: c.detailedSummary ?? null,
+          metadata: c.metadata ?? null
+        }))
+      }
+    }
+
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${this.cfg.model}:generateContent?key=${encodeURIComponent(
+      apiKey!
+    )}`
+
+    const prompt = buildCardGenerationPrompt({
+      windowStartTs: opts.windowStartTs,
+      windowEndTs: opts.windowEndTs,
+      observations: opts.observations,
+      contextCards: opts.contextCards
+    })
+
+    const requestBody = {
+      contents: [{ role: 'user', parts: [{ text: prompt }] }],
+      generationConfig: {
+        temperature: 0.2
+      }
+    }
+
+    const callGroupId = `batch:${opts.batchId}:generate_cards:${Date.now()}`
+
+    const { text, latencyMs, httpStatus } = await this.fetchWithRetry({
+      url,
+      method: 'POST',
+      body: JSON.stringify(requestBody),
+      callGroupId,
+      batchId: opts.batchId,
+      model: this.cfg.model,
+      operation: 'generate_cards'
+    })
+
+    const extracted = stripCodeFences(extractGeminiText(text))
+    const parsed = parseAndValidateCardsJson({
+      jsonText: extracted,
+      windowStartTs: opts.windowStartTs,
+      windowEndTs: opts.windowEndTs
+    })
+    if (parsed.cards.length === 0) {
+      throw new Error('Gemini returned no valid cards')
+    }
+
+    await this.storage.insertLLMCall({
+      batchId: opts.batchId,
+      callGroupId,
+      attempt: 1,
+      provider: 'gemini',
+      model: this.cfg.model,
+      operation: 'generate_cards_parse',
+      status: 'success',
+      latencyMs,
+      httpStatus,
+      requestMethod: 'POST',
+      requestUrl: redactKeyInUrl(url),
+      requestBody: this.cfg.logBodies ? JSON.stringify(requestBody) : null,
+      responseBody: this.cfg.logBodies ? extracted : null
+    })
+
+    return {
+      cards: parsed.cards.map((c) => ({
+        startTs: c.startTs,
+        endTs: c.endTs,
+        category: c.category,
+        subcategory: c.subcategory ?? null,
+        title: c.title,
+        summary: c.summary ?? null,
+        detailedSummary: c.detailedSummary ?? null,
+        metadata: c.metadata ?? null
+      }))
+    }
+  }
+
   private async fetchWithRetry(opts: {
     url: string
     method: string
@@ -250,6 +384,38 @@ function buildTranscriptionPrompt(opts: { screenshotIntervalSeconds: number }): 
   ].join('\n')
 }
 
+function buildCardGenerationPrompt(opts: {
+  windowStartTs: number
+  windowEndTs: number
+  observations: Array<{ startTs: number; endTs: number; observation: string }>
+  contextCards: Array<{ startTs: number; endTs: number; category: string; title: string; summary?: string | null }>
+}): string {
+  return [
+    'Return valid JSON only.',
+    '',
+    'You are generating timeline activity cards from timestamped observations.',
+    `Window: [${opts.windowStartTs}, ${opts.windowEndTs}] (unix seconds).`,
+    '',
+    'Allowed categories: Work, Personal, Distraction, Idle',
+    'Use Idle when the user appears inactive for more than half of the period.',
+    '',
+    'Observations (JSON array):',
+    JSON.stringify(opts.observations),
+    '',
+    'Existing cards in the window for continuity (JSON array):',
+    JSON.stringify(opts.contextCards),
+    '',
+    'Output format:',
+    '{"cards":[{"startTs":0,"endTs":0,"category":"Work|Personal|Distraction|Idle","subcategory":"string","title":"string","summary":"string","detailedSummary":"string","appSites":{"primary":"string|null","secondary":"string|null"}}]}',
+    '',
+    'Rules:',
+    '- Use unix seconds for startTs/endTs.',
+    '- Each card must satisfy endTs > startTs.',
+    '- Keep all cards within the Window.',
+    '- Do not output any text outside the JSON.'
+  ].join('\n')
+}
+
 function extractGeminiText(raw: string): string {
   // The API returns a JSON envelope; we only want the model text.
   // If parsing fails, fall back to the raw response.
@@ -261,13 +427,6 @@ function extractGeminiText(raw: string): string {
   } catch {
     return raw
   }
-}
-
-function stripCodeFences(s: string): string {
-  const trimmed = s.trim()
-  const m = /^```(?:json)?\s*([\s\S]*?)\s*```$/i.exec(trimmed)
-  if (m) return m[1].trim()
-  return s
 }
 
 function redactKeyInUrl(url: string): string {
