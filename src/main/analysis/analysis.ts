@@ -152,9 +152,17 @@ export class AnalysisService {
     this.processingInFlight = true
     try {
       while (true) {
-        const batch = await this.storage.fetchNextBatchByStatus('pending')
+        const batch =
+          (await this.storage.fetchNextBatchByStatus('pending')) ??
+          (await this.storage.fetchNextBatchByStatus('transcribed'))
         if (!batch) return
         this.processingBatchId = batch.id
+
+        if (batch.status === 'transcribed') {
+          await this.generateCardsForBatch(batch.id)
+          this.processingBatchId = null
+          continue
+        }
 
         const screenshots = await this.storage.getBatchScreenshots(batch.id)
         if (screenshots.length === 0) {
@@ -189,6 +197,13 @@ export class AnalysisService {
           screenshotIntervalSeconds: intervalSeconds
         })
 
+        if (res.observationsInserted === 0) {
+          await this.storage.setBatchStatus({ batchId: batch.id, status: 'analyzed', reason: '0_observations' })
+          this.events.analysisBatchUpdated({ batchId: batch.id, status: 'analyzed', reason: '0_observations' })
+          this.processingBatchId = null
+          continue
+        }
+
         await this.storage.setBatchStatus({
           batchId: batch.id,
           status: 'transcribed',
@@ -204,22 +219,102 @@ export class AnalysisService {
       }
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e)
-      this.log.error('analysis.transcribeFailed', { message })
+      this.log.error('analysis.batchFailed', { message })
       if (this.processingBatchId) {
-        await this.storage.setBatchStatus({
-          batchId: this.processingBatchId,
-          status: 'failed',
-          reason: message
-        })
-        this.events.analysisBatchUpdated({
-          batchId: this.processingBatchId,
-          status: 'failed',
-          reason: message
-        })
+        await this.failBatchWithSystemCard(this.processingBatchId, message)
       }
     } finally {
       this.processingBatchId = null
       this.processingInFlight = false
     }
+  }
+
+  private async generateCardsForBatch(batchId: number): Promise<void> {
+    const batch = await this.storage.getBatch(batchId)
+    if (!batch) return
+
+    const windowEndTs = batch.batchEndTs
+    const windowStartTs = windowEndTs - 3600
+
+    await this.storage.setBatchStatus({
+      batchId,
+      status: 'processing_generate_cards',
+      reason: null
+    })
+    this.events.analysisBatchUpdated({ batchId, status: 'processing_generate_cards' })
+
+    const observations = await this.storage.fetchObservationsInRange({
+      startTs: windowStartTs,
+      endTs: windowEndTs
+    })
+
+    const context = await this.storage.fetchCardsInRange({
+      startTs: windowStartTs,
+      endTs: windowEndTs,
+      includeSystem: false
+    })
+
+    const cardsRes = await this.gemini.generateCards({
+      batchId,
+      windowStartTs,
+      windowEndTs,
+      observations: observations.map((o) => ({
+        startTs: o.startTs,
+        endTs: o.endTs,
+        observation: o.observation
+      })),
+      contextCards: context.map((c: any) => ({
+        startTs: Number(c.start_ts),
+        endTs: Number(c.end_ts),
+        category: String(c.category),
+        title: String(c.title),
+        summary: c.summary ?? null
+      }))
+    })
+
+    await this.storage.replaceCardsInRange({
+      fromTs: windowStartTs,
+      toTs: windowEndTs,
+      batchId,
+      newCards: cardsRes.cards.map((c) => ({
+        startTs: c.startTs,
+        endTs: c.endTs,
+        category: c.category,
+        subcategory: c.subcategory ?? null,
+        title: c.title,
+        summary: c.summary ?? null,
+        detailedSummary: c.detailedSummary ?? null,
+        metadata: c.metadata ?? null
+      }))
+    })
+
+    await this.storage.setBatchStatus({ batchId, status: 'analyzed', reason: null })
+    this.events.analysisBatchUpdated({ batchId, status: 'analyzed' })
+  }
+
+  private async failBatchWithSystemCard(batchId: number, reason: string) {
+    const batch = await this.storage.getBatch(batchId)
+    if (!batch) return
+
+    await this.storage.setBatchStatus({ batchId, status: 'failed', reason })
+    this.events.analysisBatchUpdated({ batchId, status: 'failed', reason })
+
+    await this.storage.replaceCardsInRange({
+      fromTs: batch.batchStartTs,
+      toTs: batch.batchEndTs,
+      batchId,
+      newCards: [
+        {
+          startTs: batch.batchStartTs,
+          endTs: batch.batchEndTs,
+          category: 'System',
+          subcategory: 'Error',
+          title: 'Processing failed',
+          summary: reason,
+          detailedSummary: null,
+          metadata: null
+        }
+      ]
+    })
   }
 }
