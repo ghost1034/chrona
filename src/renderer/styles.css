@@ -37,6 +37,14 @@ body {
   margin-bottom: 18px;
 }
 
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
 .wordmark {
   font-size: 36px;
   font-weight: 750;
@@ -49,13 +57,132 @@ body {
   font-size: 13px;
 }
 
-.panel {
-  max-width: 760px;
+.layout {
+  display: grid;
+  grid-template-columns: minmax(520px, 1fr) 360px;
+  gap: 16px;
+  align-items: start;
+}
+
+.timeline,
+.sidePanel {
   border: 1px solid var(--stroke);
   background: linear-gradient(180deg, var(--card), var(--card2));
   border-radius: 14px;
   box-shadow: 0 18px 60px var(--shadow);
-  padding: 18px;
+}
+
+.timelineScroll {
+  height: calc(100vh - 160px);
+  min-height: 520px;
+  overflow: auto;
+  border-radius: 14px;
+}
+
+.timelineGrid {
+  position: relative;
+  height: 2400px;
+  padding: 16px;
+  box-sizing: border-box;
+}
+
+.tick {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 0;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.tickLabel {
+  position: absolute;
+  left: 8px;
+  top: -10px;
+  padding: 2px 6px;
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.22);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.nowLine {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 0;
+  border-top: 1px dashed rgba(59, 212, 178, 0.9);
+  box-shadow: 0 0 0 1px rgba(59, 212, 178, 0.2);
+}
+
+.card {
+  position: absolute;
+  left: 96px;
+  right: 12px;
+  padding: 10px 10px;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(0, 0, 0, 0.22);
+  cursor: pointer;
+  overflow: hidden;
+}
+
+.card:hover {
+  border-color: rgba(255, 255, 255, 0.22);
+}
+
+.card.selected {
+  border-color: rgba(59, 212, 178, 0.7);
+  box-shadow: 0 0 0 1px rgba(59, 212, 178, 0.25);
+}
+
+.card.system {
+  border-color: rgba(255, 180, 168, 0.5);
+}
+
+.cardTitle {
+  font-weight: 650;
+  letter-spacing: -0.01em;
+}
+
+.cardMeta {
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.sidePanel {
+  padding: 14px;
+}
+
+.sideTitle {
+  font-size: 18px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+.sideMeta {
+  margin-top: 6px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.field {
+  margin-top: 12px;
+}
+
+.block {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.text {
+  margin-top: 6px;
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--text);
+  white-space: pre-wrap;
 }
 
 .row {
@@ -126,6 +253,12 @@ body {
 @media (max-width: 700px) {
   .app {
     padding: 18px 16px 28px;
+  }
+  .layout {
+    grid-template-columns: 1fr;
+  }
+  .timelineScroll {
+    height: 60vh;
   }
   .row {
     flex-direction: column;
