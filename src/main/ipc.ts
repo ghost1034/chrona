@@ -6,6 +6,9 @@ import type { StorageService } from './storage/storage'
 import { shell } from 'electron'
 import type { AnalysisService } from './analysis/analysis'
 import { getGeminiApiKey, setGeminiApiKey } from './gemini/keychain'
+import { clipboard, dialog } from 'electron'
+import { formatDayForClipboard, formatRangeMarkdown } from '../shared/export'
+import { dayKeyFromUnixSeconds } from '../shared/time'
 
 type Handler<K extends keyof IpcContract> = (
   req: IpcContract[K]['req']
@@ -47,6 +50,93 @@ export function registerIpc(opts: {
     const k = await getGeminiApiKey()
     return { hasApiKey: !!k }
   })
+
+  handle('timeline:getDay', async (req) => {
+    const cards = await opts.storage.fetchCardsForDay(req.dayKey)
+    return {
+      dayKey: req.dayKey,
+      cards: cards.map(mapCardRow)
+    }
+  })
+
+  handle('timeline:updateCardCategory', async (req) => {
+    await opts.storage.updateCardCategory({
+      cardId: req.cardId,
+      category: req.category,
+      subcategory: req.subcategory ?? null
+    })
+    return { ok: true }
+  })
+
+  handle('timeline:copyDayToClipboard', async (req) => {
+    const cards = (await opts.storage.fetchCardsForDay(req.dayKey)).map(mapCardRow)
+    const text = formatDayForClipboard({ dayKey: req.dayKey, cards })
+    clipboard.writeText(text)
+    return { ok: true }
+  })
+
+  handle('timeline:saveMarkdownRange', async (req) => {
+    const days = await loadDayRange(opts.storage, req.startDayKey, req.endDayKey)
+    const markdown = formatRangeMarkdown({
+      startDayKey: req.startDayKey,
+      endDayKey: req.endDayKey,
+      days
+    })
+
+    const defaultName = `dayflow-${req.startDayKey}_to_${req.endDayKey}.md`
+    const res = await dialog.showSaveDialog({
+      title: 'Export timeline as Markdown',
+      defaultPath: defaultName,
+      filters: [{ name: 'Markdown', extensions: ['md'] }]
+    })
+    if (res.canceled || !res.filePath) return { ok: true, filePath: null }
+    await import('node:fs/promises').then((fs) => fs.writeFile(res.filePath!, markdown, 'utf8'))
+    return { ok: true, filePath: res.filePath }
+  })
+}
+
+function mapCardRow(r: any) {
+  return {
+    id: Number(r.id),
+    batchId: r.batch_id === null || r.batch_id === undefined ? null : Number(r.batch_id),
+    startTs: Number(r.start_ts),
+    endTs: Number(r.end_ts),
+    dayKey: String(r.day),
+    title: String(r.title),
+    summary: r.summary ?? null,
+    detailedSummary: r.detailed_summary ?? null,
+    category: String(r.category),
+    subcategory: r.subcategory ?? null,
+    metadata: r.metadata ?? null,
+    videoSummaryUrl: r.video_summary_url ?? null
+  }
+}
+
+async function loadDayRange(storage: StorageService, startDayKey: string, endDayKey: string) {
+  const start = parseDayKey(startDayKey)
+  const end = parseDayKey(endDayKey)
+  if (!start || !end) throw new Error('Invalid dayKey')
+  if (start.getTime() > end.getTime()) throw new Error('startDayKey must be <= endDayKey')
+
+  const days: Array<{ dayKey: string; cards: any[] }> = []
+  const d = new Date(start)
+  while (d.getTime() <= end.getTime()) {
+    const dayKey = dayKeyFromUnixSeconds(Math.floor(d.getTime() / 1000) + 4 * 60 * 60)
+    const cards = (await storage.fetchCardsForDay(dayKey)).map(mapCardRow)
+    days.push({ dayKey, cards })
+    d.setDate(d.getDate() + 1)
+  }
+  return days
+}
+
+function parseDayKey(dayKey: string): Date | null {
+  const m = /^([0-9]{4})-([0-9]{2})-([0-9]{2})$/.exec(dayKey)
+  if (!m) return null
+  const y = Number(m[1])
+  const mo = Number(m[2]) - 1
+  const da = Number(m[3])
+  const d = new Date(y, mo, da, 0, 0, 0, 0)
+  return Number.isNaN(d.getTime()) ? null : d
 }
 
 function handle<K extends keyof IpcContract>(channel: K, fn: Handler<K>) {

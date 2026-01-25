@@ -71,6 +71,9 @@ async function main() {
     events: {
       analysisBatchUpdated: (payload) => {
         win.webContents.send(IPC_EVENTS.analysisBatchUpdated, payload)
+      },
+      timelineUpdated: (payload) => {
+        win.webContents.send(IPC_EVENTS.timelineUpdated, payload)
       }
     },
     settings

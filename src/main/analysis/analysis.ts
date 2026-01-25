@@ -4,9 +4,11 @@ import { createScreenshotBatches } from '../../shared/batching'
 import { GeminiService } from '../gemini/gemini'
 import type { SettingsStore } from '../settings'
 import { getGeminiApiKey } from '../gemini/keychain'
+import { dayKeyFromUnixSeconds } from '../../shared/time'
 
 type Events = {
   analysisBatchUpdated: (payload: { batchId: number; status: string; reason?: string | null }) => void
+  timelineUpdated: (payload: { dayKey: string }) => void
 }
 
 export class AnalysisService {
@@ -288,6 +290,8 @@ export class AnalysisService {
       }))
     })
 
+    this.events.timelineUpdated({ dayKey: dayKeyFromUnixSeconds(windowEndTs) })
+
     await this.storage.setBatchStatus({ batchId, status: 'analyzed', reason: null })
     this.events.analysisBatchUpdated({ batchId, status: 'analyzed' })
   }
@@ -316,5 +320,7 @@ export class AnalysisService {
         }
       ]
     })
+
+    this.events.timelineUpdated({ dayKey: dayKeyFromUnixSeconds(batch.batchEndTs) })
   }
 }
