@@ -88,6 +88,23 @@ export type IpcContract = {
     req: void
     res: { hasApiKey: boolean }
   }
+
+  'timeline:getDay': {
+    req: { dayKey: string }
+    res: { dayKey: string; cards: import('./timeline').TimelineCardDTO[] }
+  }
+  'timeline:updateCardCategory': {
+    req: { cardId: number; category: string; subcategory?: string | null }
+    res: { ok: true }
+  }
+  'timeline:copyDayToClipboard': {
+    req: { dayKey: string }
+    res: { ok: true }
+  }
+  'timeline:saveMarkdownRange': {
+    req: { startDayKey: string; endDayKey: string }
+    res: { ok: true; filePath: string | null }
+  }
 }
 
 export const IPC_CHANNELS = {
@@ -103,13 +120,18 @@ export const IPC_CHANNELS = {
   analysisRunTick: 'analysis:runTick',
   analysisGetRecentBatches: 'analysis:getRecentBatches',
   geminiSetApiKey: 'gemini:setApiKey',
-  geminiHasApiKey: 'gemini:hasApiKey'
+  geminiHasApiKey: 'gemini:hasApiKey',
+  timelineGetDay: 'timeline:getDay',
+  timelineUpdateCardCategory: 'timeline:updateCardCategory',
+  timelineCopyDayToClipboard: 'timeline:copyDayToClipboard',
+  timelineSaveMarkdownRange: 'timeline:saveMarkdownRange'
 } as const
 
 export const IPC_EVENTS = {
   recordingStateChanged: 'event:recordingStateChanged',
   captureError: 'event:captureError',
-  analysisBatchUpdated: 'event:analysisBatchUpdated'
+  analysisBatchUpdated: 'event:analysisBatchUpdated',
+  timelineUpdated: 'event:timelineUpdated'
 } as const
 
 export type IpcChannel = IpcContractKey
