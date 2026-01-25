@@ -37,7 +37,8 @@ async function main() {
     storage,
     log,
     events: {
-      analysisBatchUpdated: () => {}
+      analysisBatchUpdated: () => {},
+      timelineUpdated: () => {}
     },
     settings
   })

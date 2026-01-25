@@ -30,6 +30,13 @@ contextBridge.exposeInMainWorld('chrona', {
   setGeminiApiKey: (apiKey: string) => invoke('gemini:setApiKey', { apiKey }),
   hasGeminiApiKey: () => invoke('gemini:hasApiKey', undefined),
 
+  getTimelineDay: (dayKey: string) => invoke('timeline:getDay', { dayKey }),
+  updateTimelineCardCategory: (opts: { cardId: number; category: string; subcategory?: string | null }) =>
+    invoke('timeline:updateCardCategory', opts),
+  copyDayToClipboard: (dayKey: string) => invoke('timeline:copyDayToClipboard', { dayKey }),
+  saveMarkdownRange: (startDayKey: string, endDayKey: string) =>
+    invoke('timeline:saveMarkdownRange', { startDayKey, endDayKey }),
+
   onRecordingStateChanged: (cb: (state: IpcContract['capture:getState']['res']) => void) => {
     const listener = (_event: unknown, payload: IpcContract['capture:getState']['res']) => cb(payload)
     ipcRenderer.on(IPC_EVENTS.recordingStateChanged, listener)
@@ -50,6 +57,12 @@ contextBridge.exposeInMainWorld('chrona', {
     ) => cb(payload)
     ipcRenderer.on(IPC_EVENTS.analysisBatchUpdated, listener)
     return () => ipcRenderer.removeListener(IPC_EVENTS.analysisBatchUpdated, listener)
+  },
+
+  onTimelineUpdated: (cb: (payload: { dayKey: string }) => void) => {
+    const listener = (_event: unknown, payload: { dayKey: string }) => cb(payload)
+    ipcRenderer.on(IPC_EVENTS.timelineUpdated, listener)
+    return () => ipcRenderer.removeListener(IPC_EVENTS.timelineUpdated, listener)
   }
 })
 
@@ -74,6 +87,15 @@ export type ChronaApi = {
   setGeminiApiKey: (apiKey: string) => InvokeResult<'gemini:setApiKey'>
   hasGeminiApiKey: () => InvokeResult<'gemini:hasApiKey'>
 
+  getTimelineDay: (dayKey: string) => InvokeResult<'timeline:getDay'>
+  updateTimelineCardCategory: (opts: {
+    cardId: number
+    category: string
+    subcategory?: string | null
+  }) => InvokeResult<'timeline:updateCardCategory'>
+  copyDayToClipboard: (dayKey: string) => InvokeResult<'timeline:copyDayToClipboard'>
+  saveMarkdownRange: (startDayKey: string, endDayKey: string) => InvokeResult<'timeline:saveMarkdownRange'>
+
   onRecordingStateChanged: (
     cb: (state: IpcContract['capture:getState']['res']) => void
   ) => () => void
@@ -82,4 +104,6 @@ export type ChronaApi = {
   onAnalysisBatchUpdated: (
     cb: (payload: { batchId: number; status: string; reason?: string | null }) => void
   ) => () => void
+
+  onTimelineUpdated: (cb: (payload: { dayKey: string }) => void) => () => void
 }
