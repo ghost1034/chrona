@@ -105,6 +105,19 @@ export type IpcContract = {
     req: { startDayKey: string; endDayKey: string }
     res: { ok: true; filePath: string | null }
   }
+
+  'review:getDay': {
+    req: { dayKey: string }
+    res: {
+      dayKey: string
+      segments: import('./review').ReviewSegment[]
+      coverageByCardId: Record<number, number>
+    }
+  }
+  'review:applyRating': {
+    req: { startTs: number; endTs: number; rating: import('./review').ReviewRating }
+    res: { ok: true }
+  }
 }
 
 export const IPC_CHANNELS = {
@@ -124,7 +137,9 @@ export const IPC_CHANNELS = {
   timelineGetDay: 'timeline:getDay',
   timelineUpdateCardCategory: 'timeline:updateCardCategory',
   timelineCopyDayToClipboard: 'timeline:copyDayToClipboard',
-  timelineSaveMarkdownRange: 'timeline:saveMarkdownRange'
+  timelineSaveMarkdownRange: 'timeline:saveMarkdownRange',
+  reviewGetDay: 'review:getDay',
+  reviewApplyRating: 'review:applyRating'
 } as const
 
 export const IPC_EVENTS = {
