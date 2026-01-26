@@ -9,6 +9,8 @@ import { getGeminiApiKey, setGeminiApiKey } from './gemini/keychain'
 import { clipboard, dialog } from 'electron'
 import { formatDayForClipboard, formatRangeMarkdown } from '../shared/export'
 import { dayKeyFromUnixSeconds } from '../shared/time'
+import { dayWindowForDayKey } from '../shared/time'
+import { coverageByCardId } from '../shared/review'
 
 type Handler<K extends keyof IpcContract> = (
   req: IpcContract[K]['req']
@@ -92,6 +94,31 @@ export function registerIpc(opts: {
     if (res.canceled || !res.filePath) return { ok: true, filePath: null }
     await import('node:fs/promises').then((fs) => fs.writeFile(res.filePath!, markdown, 'utf8'))
     return { ok: true, filePath: res.filePath }
+  })
+
+  handle('review:getDay', async (req) => {
+    const cards = (await opts.storage.fetchCardsForDay(req.dayKey)).map(mapCardRow)
+    const win = dayWindowForDayKey(req.dayKey)
+    const segments = await opts.storage.fetchReviewSegmentsInRange({
+      startTs: win.startTs,
+      endTs: win.endTs
+    })
+    const coverage = coverageByCardId({ cards, segments, ignoreSystem: true })
+
+    return {
+      dayKey: req.dayKey,
+      segments,
+      coverageByCardId: coverage
+    }
+  })
+
+  handle('review:applyRating', async (req) => {
+    await opts.storage.applyReviewRatingSegment({
+      startTs: req.startTs,
+      endTs: req.endTs,
+      rating: req.rating
+    })
+    return { ok: true }
   })
 }
 
