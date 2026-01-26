@@ -20,6 +20,8 @@ export function App() {
   const [dayKey, setDayKey] = useState<string>(() => dayKeyFromUnixSeconds(Math.floor(Date.now() / 1000)))
   const [cards, setCards] = useState<TimelineCardDTO[]>([])
   const [selectedCardId, setSelectedCardId] = useState<number | null>(null)
+  const [view, setView] = useState<'timeline' | 'review'>('timeline')
+  const [reviewCoverage, setReviewCoverage] = useState<Record<number, number>>({})
   const selectedCard = useMemo(
     () => cards.find((c) => c.id === selectedCardId) ?? null,
     [cards, selectedCardId]
@@ -68,6 +70,11 @@ export function App() {
   }, [dayKey])
 
   useEffect(() => {
+    if (view !== 'review') return
+    void refreshReview(dayKey)
+  }, [view, dayKey])
+
+  useEffect(() => {
     const unsub = window.chrona.onTimelineUpdated((p) => {
       if (p.dayKey !== dayKey) return
       void refreshDay(dayKey)
@@ -79,6 +86,11 @@ export function App() {
     const day = await window.chrona.getTimelineDay(k)
     setCards(resolveOverlapsForDisplay(day.cards))
     setSelectedCardId(null)
+  }
+
+  async function refreshReview(k: string) {
+    const res = await window.chrona.getReviewDay(k)
+    setReviewCoverage(res.coverageByCardId)
   }
 
   async function onSaveInterval() {
@@ -120,6 +132,11 @@ export function App() {
     await window.chrona.saveMarkdownRange(dayKey, dayKey)
   }
 
+  async function onApplyRating(card: TimelineCardDTO, rating: 'focus' | 'neutral' | 'distracted') {
+    await window.chrona.applyReviewRating(card.startTs, card.endTs, rating)
+    await refreshReview(dayKey)
+  }
+
   function shiftDay(deltaDays: number) {
     const base = new Date(dayKey + 'T00:00:00')
     base.setDate(base.getDate() + deltaDays)
@@ -143,6 +160,18 @@ export function App() {
         </div>
 
         <div className="toolbar">
+          <button
+            className={`btn ${view === 'timeline' ? 'btn-accent' : ''}`}
+            onClick={() => setView('timeline')}
+          >
+            Timeline
+          </button>
+          <button
+            className={`btn ${view === 'review' ? 'btn-accent' : ''}`}
+            onClick={() => setView('review')}
+          >
+            Review
+          </button>
           <button className="btn" onClick={() => shiftDay(-1)}>
             Prev
           </button>
@@ -171,32 +200,42 @@ export function App() {
       </header>
 
       <main className="layout">
-        <section className="timeline">
-          <div className="timelineScroll">
-            <div className="timelineGrid">
-              {renderHourTicks(windowInfo.startTs)}
-              {nowPct !== null && nowPct >= 0 && nowPct <= 100 ? (
-                <div className="nowLine" style={{ top: `${nowPct}%` }} />
-              ) : null}
+        {view === 'timeline' ? (
+          <section className="timeline">
+            <div className="timelineScroll">
+              <div className="timelineGrid">
+                {renderHourTicks(windowInfo.startTs)}
+                {nowPct !== null && nowPct >= 0 && nowPct <= 100 ? (
+                  <div className="nowLine" style={{ top: `${nowPct}%` }} />
+                ) : null}
 
-              {cards.map((c) => (
-                <div
-                  key={c.id}
-                  className={`card ${selectedCardId === c.id ? 'selected' : ''} ${c.category === 'System' ? 'system' : ''}`}
-                  style={cardStyle(c, windowInfo.startTs, windowInfo.endTs)}
-                  onClick={() => setSelectedCardId(c.id)}
-                  role="button"
-                  tabIndex={0}
-                >
-                  <div className="cardTitle">{c.title}</div>
-                  <div className="cardMeta">
-                    {formatClockAscii(c.startTs)} - {formatClockAscii(c.endTs)} · {c.category}
+                {cards.map((c) => (
+                  <div
+                    key={c.id}
+                    className={`card ${selectedCardId === c.id ? 'selected' : ''} ${c.category === 'System' ? 'system' : ''}`}
+                    style={cardStyle(c, windowInfo.startTs, windowInfo.endTs)}
+                    onClick={() => setSelectedCardId(c.id)}
+                    role="button"
+                    tabIndex={0}
+                  >
+                    <div className="cardTitle">{c.title}</div>
+                    <div className="cardMeta">
+                      {formatClockAscii(c.startTs)} - {formatClockAscii(c.endTs)} · {c.category}
+                    </div>
                   </div>
-                </div>
-              ))}
+                ))}
+              </div>
             </div>
-          </div>
-        </section>
+          </section>
+        ) : (
+          <section className="timeline">
+            <div className="timelineScroll">
+              <div className="reviewList">
+                {renderReviewList(cards, reviewCoverage, (card, rating) => void onApplyRating(card, rating))}
+              </div>
+            </div>
+          </section>
+        )}
 
         <aside className="side">
           {selectedCard ? (
@@ -442,4 +481,57 @@ function renderHourTicks(windowStartTs: number) {
     )
   }
   return ticks
+}
+
+function renderReviewList(
+  cards: TimelineCardDTO[],
+  coverage: Record<number, number>,
+  onRate: (card: TimelineCardDTO, rating: 'focus' | 'neutral' | 'distracted') => void
+) {
+  const rows = cards
+    .filter((c) => c.category !== 'System')
+    .map((card) => ({ card, coverage: coverage[card.id] ?? 0 }))
+    .filter((x) => x.coverage < 0.8)
+    .sort((a, b) => a.card.startTs - b.card.startTs)
+
+  if (rows.length === 0) {
+    return (
+      <div className="reviewEmpty">
+        <div className="sideTitle">Nothing to review</div>
+        <div className="sideMeta">All non-system cards are at least 80% covered.</div>
+      </div>
+    )
+  }
+
+  return (
+    <div className="reviewWrap">
+      <div className="reviewHeader">
+        <div className="sideTitle">Review</div>
+        <div className="sideMeta">Rate cards until coverage reaches 80%.</div>
+      </div>
+
+      {rows.map(({ card, coverage }) => (
+        <div key={card.id} className="reviewRow">
+          <div className="reviewRowMain">
+            <div className="reviewRowTitle">{card.title}</div>
+            <div className="reviewRowMeta">
+              {formatClockAscii(card.startTs)} - {formatClockAscii(card.endTs)} · {card.category}
+              {` · ${(coverage * 100).toFixed(0)}% covered`}
+            </div>
+          </div>
+          <div className="reviewRowActions">
+            <button className="btn" onClick={() => onRate(card, 'focus')}>
+              Focus
+            </button>
+            <button className="btn" onClick={() => onRate(card, 'neutral')}>
+              Neutral
+            </button>
+            <button className="btn" onClick={() => onRate(card, 'distracted')}>
+              Distracted
+            </button>
+          </div>
+        </div>
+      ))}
+    </div>
+  )
 }
