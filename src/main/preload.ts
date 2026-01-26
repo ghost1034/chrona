@@ -37,6 +37,10 @@ contextBridge.exposeInMainWorld('dayflow', {
   saveMarkdownRange: (startDayKey: string, endDayKey: string) =>
     invoke('timeline:saveMarkdownRange', { startDayKey, endDayKey }),
 
+  getReviewDay: (dayKey: string) => invoke('review:getDay', { dayKey }),
+  applyReviewRating: (startTs: number, endTs: number, rating: 'focus' | 'neutral' | 'distracted') =>
+    invoke('review:applyRating', { startTs, endTs, rating }),
+
   onRecordingStateChanged: (cb: (state: IpcContract['capture:getState']['res']) => void) => {
     const listener = (_event: unknown, payload: IpcContract['capture:getState']['res']) => cb(payload)
     ipcRenderer.on(IPC_EVENTS.recordingStateChanged, listener)
@@ -95,6 +99,10 @@ export type DayflowApi = {
   }) => InvokeResult<'timeline:updateCardCategory'>
   copyDayToClipboard: (dayKey: string) => InvokeResult<'timeline:copyDayToClipboard'>
   saveMarkdownRange: (startDayKey: string, endDayKey: string) => InvokeResult<'timeline:saveMarkdownRange'>
+
+  getReviewDay: (dayKey: string) => InvokeResult<'review:getDay'>
+  applyReviewRating: (startTs: number, endTs: number, rating: 'focus' | 'neutral' | 'distracted') =>
+    InvokeResult<'review:applyRating'>
 
   onRecordingStateChanged: (
     cb: (state: IpcContract['capture:getState']['res']) => void
