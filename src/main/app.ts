@@ -9,6 +9,7 @@ import { StorageService } from './storage/storage'
 import { CaptureService } from './capture/capture'
 import { IPC_EVENTS } from '../shared/ipc'
 import { AnalysisService } from './analysis/analysis'
+import { RetentionService } from './retention/retention'
 
 let quitting = false
 let mainWindow: BrowserWindow | null = null
@@ -80,7 +81,19 @@ async function main() {
   })
   analysis.start()
 
-  registerIpc({ settings, capture, storage, analysis })
+  const retention = new RetentionService({
+    storage,
+    settings,
+    log,
+    events: {
+      storageUsageUpdated: (payload) => {
+        win.webContents.send(IPC_EVENTS.storageUsageUpdated, payload)
+      }
+    }
+  })
+  retention.start()
+
+  registerIpc({ settings, capture, storage, analysis, retention })
 
   win.webContents.on('render-process-gone', (_event, details) => {
     log.error('renderer.gone', { reason: details.reason, exitCode: details.exitCode })
