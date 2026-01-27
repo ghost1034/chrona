@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import type { TimelineCardDTO } from '../shared/timeline'
 import { dayKeyFromUnixSeconds, dayWindowForDayKey, formatClockAscii } from '../shared/time'
+import { formatBytes } from '../shared/format'
 
 type DisplayInfo = { id: string; bounds: { width: number; height: number }; scaleFactor: number }
 
@@ -16,6 +17,15 @@ export function App() {
 
   const [hasGeminiKey, setHasGeminiKey] = useState<boolean | null>(null)
   const [geminiKeyInput, setGeminiKeyInput] = useState<string>('')
+
+  const [storageUsage, setStorageUsage] = useState<{
+    recordingsBytes: number
+    timelapsesBytes: number
+    recordingsLimitBytes: number
+    timelapsesLimitBytes: number
+  } | null>(null)
+  const [limitRecordingsGb, setLimitRecordingsGb] = useState<string>('10')
+  const [limitTimelapsesGb, setLimitTimelapsesGb] = useState<string>('10')
 
   const [dayKey, setDayKey] = useState<string>(() => dayKeyFromUnixSeconds(Math.floor(Date.now() / 1000)))
   const [cards, setCards] = useState<TimelineCardDTO[]>([])
@@ -39,6 +49,11 @@ export function App() {
 
       setDisplays(await window.dayflow.listDisplays())
       setHasGeminiKey((await window.dayflow.hasGeminiApiKey()).hasApiKey)
+
+      const usage = await window.dayflow.getStorageUsage()
+      setStorageUsage(usage)
+      setLimitRecordingsGb(String(Math.round(usage.recordingsLimitBytes / (1024 * 1024 * 1024))))
+      setLimitTimelapsesGb(String(Math.round(usage.timelapsesLimitBytes / (1024 * 1024 * 1024))))
     })()
 
     const unsubState = window.dayflow.onRecordingStateChanged((state) => {
@@ -58,10 +73,15 @@ export function App() {
       setAnalysisLine(`batch ${p.batchId}: ${p.status}${p.reason ? ` (${p.reason})` : ''}`)
     })
 
+    const unsubUsage = window.dayflow.onStorageUsageUpdated((u) => {
+      setStorageUsage(u)
+    })
+
     return () => {
       unsubState()
       unsubErr()
       unsubAnalysis()
+      unsubUsage()
     }
   }, [])
 
@@ -115,6 +135,29 @@ export function App() {
     await window.dayflow.setGeminiApiKey(geminiKeyInput)
     setGeminiKeyInput('')
     setHasGeminiKey((await window.dayflow.hasGeminiApiKey()).hasApiKey)
+  }
+
+  async function onSaveStorageLimits() {
+    const recGb = Number(limitRecordingsGb)
+    const tlGb = Number(limitTimelapsesGb)
+    if (!Number.isFinite(recGb) || recGb <= 0) return
+    if (!Number.isFinite(tlGb) || tlGb <= 0) return
+
+    await window.dayflow.updateSettings({
+      storageLimitRecordingsBytes: Math.floor(recGb * 1024 * 1024 * 1024),
+      storageLimitTimelapsesBytes: Math.floor(tlGb * 1024 * 1024 * 1024)
+    })
+    const usage = await window.dayflow.getStorageUsage()
+    setStorageUsage(usage)
+  }
+
+  async function onPurgeNow() {
+    const res = await window.dayflow.purgeStorageNow()
+    setAnalysisLine(
+      `purge: screenshots=${res.deletedScreenshotCount} timelapses=${res.deletedTimelapseCount} freed=${formatBytes(res.freedRecordingsBytes + res.freedTimelapsesBytes)}`
+    )
+    const usage = await window.dayflow.getStorageUsage()
+    setStorageUsage(usage)
   }
 
   async function onToggleRecording() {
@@ -371,6 +414,49 @@ export function App() {
                   Run analysis tick
                 </button>
                 <div className="mono">{analysisLine || '...'}</div>
+              </div>
+
+              <div className="block">
+                <div className="sideTitle">Storage</div>
+                <div className="sideMeta">
+                  {storageUsage
+                    ? `Recordings: ${formatBytes(storageUsage.recordingsBytes)} / ${formatBytes(storageUsage.recordingsLimitBytes)} · Timelapses: ${formatBytes(storageUsage.timelapsesBytes)} / ${formatBytes(storageUsage.timelapsesLimitBytes)}`
+                    : 'Loading...'}
+                </div>
+
+                <div className="row">
+                  <label className="label">
+                    Recordings limit (GB)
+                    <input
+                      className="input"
+                      type="number"
+                      min={1}
+                      step={1}
+                      value={limitRecordingsGb}
+                      onChange={(e) => setLimitRecordingsGb(e.target.value)}
+                    />
+                  </label>
+                  <label className="label">
+                    Timelapses limit (GB)
+                    <input
+                      className="input"
+                      type="number"
+                      min={1}
+                      step={1}
+                      value={limitTimelapsesGb}
+                      onChange={(e) => setLimitTimelapsesGb(e.target.value)}
+                    />
+                  </label>
+                </div>
+
+                <div className="row">
+                  <button className="btn" onClick={() => void onSaveStorageLimits()}>
+                    Save limits
+                  </button>
+                  <button className="btn" onClick={() => void onPurgeNow()}>
+                    Purge now
+                  </button>
+                </div>
               </div>
 
               <div className="row">

@@ -11,6 +11,7 @@ import { formatDayForClipboard, formatRangeMarkdown } from '../shared/export'
 import { dayKeyFromUnixSeconds } from '../shared/time'
 import { dayWindowForDayKey } from '../shared/time'
 import { coverageByCardId } from '../shared/review'
+import type { RetentionService } from './retention/retention'
 
 type Handler<K extends keyof IpcContract> = (
   req: IpcContract[K]['req']
@@ -21,6 +22,7 @@ export function registerIpc(opts: {
   capture: CaptureService
   storage: StorageService
   analysis: AnalysisService
+  retention: RetentionService
 }) {
   handle('app:ping', async () => ({ ok: true, nowTs: Math.floor(Date.now() / 1000) }))
   handle('settings:getAll', async () => opts.settings.getAll())
@@ -119,6 +121,21 @@ export function registerIpc(opts: {
       rating: req.rating
     })
     return { ok: true }
+  })
+
+  handle('storage:getUsage', async () => opts.retention.getUsage())
+  handle('storage:purgeNow', async () => {
+    const res = await opts.retention.purgeNow()
+    const usage = await opts.retention.getUsage()
+    return {
+      ok: true,
+      deletedScreenshotCount: res.deletedScreenshotCount,
+      deletedTimelapseCount: res.deletedTimelapseCount,
+      freedRecordingsBytes: res.freedRecordingsBytes,
+      freedTimelapsesBytes: res.freedTimelapsesBytes,
+      recordingsBytes: usage.recordingsBytes,
+      timelapsesBytes: usage.timelapsesBytes
+    }
   })
 }
 

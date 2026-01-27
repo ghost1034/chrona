@@ -639,6 +639,157 @@ export class StorageService {
     return { deletedCount }
   }
 
+  async getRecordingsUsageBytes(): Promise<number> {
+    return this.enqueue(() => {
+      const db = this.mustDb()
+      const row = db
+        .prepare('SELECT COALESCE(SUM(COALESCE(file_size, 0)), 0) AS bytes FROM screenshots WHERE is_deleted = 0')
+        .get() as any
+      return Number(row?.bytes ?? 0)
+    })
+  }
+
+  async getTimelapsesUsageBytes(): Promise<number> {
+    // No timelapses yet in Phase 10 for most builds, but keep accounting correct.
+    const root = this.resolveRelPath('timelapses')
+    const files = await listFilesRecursive(root)
+    let total = 0
+    for (const f of files) {
+      try {
+        const st = await fs.stat(f)
+        total += st.size
+      } catch {
+        // ignore
+      }
+    }
+    return total
+  }
+
+  async purgeRecordingsToLimit(limitBytes: number): Promise<{
+    deletedCount: number
+    freedBytes: number
+    remainingBytes: number
+  }> {
+    const limit = Math.max(0, Math.floor(limitBytes))
+    let remaining = await this.getRecordingsUsageBytes()
+    if (remaining <= limit) return { deletedCount: 0, freedBytes: 0, remainingBytes: remaining }
+
+    let deletedCount = 0
+    let freedBytes = 0
+
+    while (remaining > limit) {
+      const batch = await this.enqueue(() => {
+        const db = this.mustDb()
+        const rows = db
+          .prepare(
+            `SELECT id, file_path, COALESCE(file_size, 0) AS file_size
+             FROM screenshots
+             WHERE is_deleted = 0
+             ORDER BY captured_at ASC
+             LIMIT 500`
+          )
+          .all() as any[]
+
+        if (rows.length === 0) return []
+        const ids = rows.map((r) => Number(r.id))
+        const placeholders = ids.map(() => '?').join(',')
+        db.prepare(`UPDATE screenshots SET is_deleted = 1 WHERE id IN (${placeholders})`).run(...ids)
+
+        return rows.map((r) => ({
+          id: Number(r.id),
+          relPath: String(r.file_path),
+          fileSize: Number(r.file_size)
+        }))
+      })
+
+      if (batch.length === 0) break
+
+      for (const row of batch) {
+        try {
+          await fs.unlink(this.resolveRelPath(row.relPath))
+        } catch {
+          // ignore
+        }
+        deletedCount += 1
+        freedBytes += row.fileSize
+      }
+
+      remaining = await this.getRecordingsUsageBytes()
+    }
+
+    return { deletedCount, freedBytes, remainingBytes: remaining }
+  }
+
+  async purgeTimelapsesToLimit(limitBytes: number): Promise<{
+    deletedCount: number
+    freedBytes: number
+    remainingBytes: number
+  }> {
+    const limit = Math.max(0, Math.floor(limitBytes))
+
+    const root = this.resolveRelPath('timelapses')
+    const files = await listFilesRecursive(root)
+    const entries: Array<{ abs: string; rel: string; size: number; mtimeMs: number }> = []
+    for (const abs of files) {
+      try {
+        const st = await fs.stat(abs)
+        const rel = absPathToRelUnderUserData(this.userDataPath, abs)
+        if (!rel) continue
+        entries.push({ abs, rel, size: st.size, mtimeMs: st.mtimeMs })
+      } catch {
+        // ignore
+      }
+    }
+
+    let total = entries.reduce((a, e) => a + e.size, 0)
+    if (total <= limit) return { deletedCount: 0, freedBytes: 0, remainingBytes: total }
+
+    const referenced = await this.enqueue(() => {
+      const db = this.mustDb()
+      const rows = db
+        .prepare(
+          `SELECT video_summary_url AS p
+           FROM timeline_cards
+           WHERE is_deleted = 0 AND video_summary_url IS NOT NULL`
+        )
+        .all() as any[]
+      return new Set(rows.map((r) => String(r.p)))
+    })
+
+    // Prefer deleting unreferenced files first.
+    const unref = entries.filter((e) => !referenced.has(e.rel)).sort((a, b) => a.mtimeMs - b.mtimeMs)
+    const ref = entries.filter((e) => referenced.has(e.rel)).sort((a, b) => a.mtimeMs - b.mtimeMs)
+    const ordered = [...unref, ...ref]
+
+    let deletedCount = 0
+    let freedBytes = 0
+
+    for (const e of ordered) {
+      if (total <= limit) break
+
+      if (referenced.has(e.rel)) {
+        await this.enqueue(() => {
+          const db = this.mustDb()
+          db.prepare('UPDATE timeline_cards SET video_summary_url = NULL WHERE video_summary_url = ?').run(
+            e.rel
+          )
+        })
+      }
+
+      try {
+        await fs.unlink(e.abs)
+        deletedCount += 1
+        freedBytes += e.size
+        total -= e.size
+      } catch {
+        // ignore
+      }
+    }
+
+    const remainingBytes = await this.getTimelapsesUsageBytes()
+    return { deletedCount, freedBytes, remainingBytes }
+  }
+
   private absPath(...parts: string[]): string {
     return path.join(this.userDataPath, ...parts)
   }
