@@ -41,6 +41,9 @@ contextBridge.exposeInMainWorld('chrona', {
   applyReviewRating: (startTs: number, endTs: number, rating: 'focus' | 'neutral' | 'distracted') =>
     invoke('review:applyRating', { startTs, endTs, rating }),
 
+  getStorageUsage: () => invoke('storage:getUsage', undefined),
+  purgeStorageNow: () => invoke('storage:purgeNow', undefined),
+
   onRecordingStateChanged: (cb: (state: IpcContract['capture:getState']['res']) => void) => {
     const listener = (_event: unknown, payload: IpcContract['capture:getState']['res']) => cb(payload)
     ipcRenderer.on(IPC_EVENTS.recordingStateChanged, listener)
@@ -67,6 +70,27 @@ contextBridge.exposeInMainWorld('chrona', {
     const listener = (_event: unknown, payload: { dayKey: string }) => cb(payload)
     ipcRenderer.on(IPC_EVENTS.timelineUpdated, listener)
     return () => ipcRenderer.removeListener(IPC_EVENTS.timelineUpdated, listener)
+  },
+
+  onStorageUsageUpdated: (
+    cb: (payload: {
+      recordingsBytes: number
+      timelapsesBytes: number
+      recordingsLimitBytes: number
+      timelapsesLimitBytes: number
+    }) => void
+  ) => {
+    const listener = (
+      _event: unknown,
+      payload: {
+        recordingsBytes: number
+        timelapsesBytes: number
+        recordingsLimitBytes: number
+        timelapsesLimitBytes: number
+      }
+    ) => cb(payload)
+    ipcRenderer.on(IPC_EVENTS.storageUsageUpdated, listener)
+    return () => ipcRenderer.removeListener(IPC_EVENTS.storageUsageUpdated, listener)
   }
 })
 
@@ -104,6 +128,9 @@ export type ChronaApi = {
   applyReviewRating: (startTs: number, endTs: number, rating: 'focus' | 'neutral' | 'distracted') =>
     InvokeResult<'review:applyRating'>
 
+  getStorageUsage: () => InvokeResult<'storage:getUsage'>
+  purgeStorageNow: () => InvokeResult<'storage:purgeNow'>
+
   onRecordingStateChanged: (
     cb: (state: IpcContract['capture:getState']['res']) => void
   ) => () => void
@@ -114,4 +141,10 @@ export type ChronaApi = {
   ) => () => void
 
   onTimelineUpdated: (cb: (payload: { dayKey: string }) => void) => () => void
+  onStorageUsageUpdated: (cb: (payload: {
+    recordingsBytes: number
+    timelapsesBytes: number
+    recordingsLimitBytes: number
+    timelapsesLimitBytes: number
+  }) => void) => () => void
 }
