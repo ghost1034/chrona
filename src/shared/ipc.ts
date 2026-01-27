@@ -4,8 +4,10 @@ export type AppPingResponse = {
 }
 
 export type Settings = {
-  version: 1
+  version: 2
   captureIntervalSeconds: number
+  storageLimitRecordingsBytes: number
+  storageLimitTimelapsesBytes: number
 }
 
 export type CaptureState = {
@@ -118,6 +120,28 @@ export type IpcContract = {
     req: { startTs: number; endTs: number; rating: import('./review').ReviewRating }
     res: { ok: true }
   }
+
+  'storage:getUsage': {
+    req: void
+    res: {
+      recordingsBytes: number
+      timelapsesBytes: number
+      recordingsLimitBytes: number
+      timelapsesLimitBytes: number
+    }
+  }
+  'storage:purgeNow': {
+    req: void
+    res: {
+      ok: true
+      deletedScreenshotCount: number
+      deletedTimelapseCount: number
+      freedRecordingsBytes: number
+      freedTimelapsesBytes: number
+      recordingsBytes: number
+      timelapsesBytes: number
+    }
+  }
 }
 
 export const IPC_CHANNELS = {
@@ -139,14 +163,17 @@ export const IPC_CHANNELS = {
   timelineCopyDayToClipboard: 'timeline:copyDayToClipboard',
   timelineSaveMarkdownRange: 'timeline:saveMarkdownRange',
   reviewGetDay: 'review:getDay',
-  reviewApplyRating: 'review:applyRating'
+  reviewApplyRating: 'review:applyRating',
+  storageGetUsage: 'storage:getUsage',
+  storagePurgeNow: 'storage:purgeNow'
 } as const
 
 export const IPC_EVENTS = {
   recordingStateChanged: 'event:recordingStateChanged',
   captureError: 'event:captureError',
   analysisBatchUpdated: 'event:analysisBatchUpdated',
-  timelineUpdated: 'event:timelineUpdated'
+  timelineUpdated: 'event:timelineUpdated',
+  storageUsageUpdated: 'event:storageUsageUpdated'
 } as const
 
 export type IpcChannel = IpcContractKey
