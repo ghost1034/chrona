@@ -183,11 +183,13 @@ export class GeminiService {
     }
 
     if (process.env.DAYFLOW_GEMINI_MOCK) {
+      const endTs = Math.max(opts.windowStartTs + 60, opts.windowEndTs - 60)
+      const startTs = Math.max(opts.windowStartTs, endTs - 15 * 60)
       const mockJson = JSON.stringify({
         cards: [
           {
-            startTs: opts.windowStartTs,
-            endTs: Math.min(opts.windowEndTs, opts.windowStartTs + 15 * 60),
+            startTs,
+            endTs,
             category: 'Work',
             subcategory: 'Mock',
             title: 'Mock activity',
