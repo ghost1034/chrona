@@ -3,10 +3,12 @@ import path from 'node:path'
 import type { Settings } from '../shared/ipc'
 
 const DEFAULT_SETTINGS: Settings = {
-  version: 2,
+  version: 3,
   captureIntervalSeconds: 10,
   storageLimitRecordingsBytes: 10 * 1024 * 1024 * 1024,
-  storageLimitTimelapsesBytes: 10 * 1024 * 1024 * 1024
+  storageLimitTimelapsesBytes: 10 * 1024 * 1024 * 1024,
+  timelapsesEnabled: false,
+  timelapseFps: 2
 }
 
 export class SettingsStore {
@@ -24,9 +26,9 @@ export class SettingsStore {
       const parsed = JSON.parse(raw) as any
 
       // Allow older settings versions by merging them forward.
-      if (parsed?.version !== 1 && parsed?.version !== 2) return DEFAULT_SETTINGS
+      if (parsed?.version !== 1 && parsed?.version !== 2 && parsed?.version !== 3) return DEFAULT_SETTINGS
 
-      return { ...DEFAULT_SETTINGS, ...parsed, version: 2 }
+      return { ...DEFAULT_SETTINGS, ...parsed, version: 3 }
     } catch {
       return DEFAULT_SETTINGS
     }
@@ -37,7 +39,7 @@ export class SettingsStore {
     const next: Settings = {
       ...current,
       ...patch,
-      version: 2
+      version: 3
     }
 
     await fs.mkdir(path.dirname(this.filePath), { recursive: true })
