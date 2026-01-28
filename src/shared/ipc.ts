@@ -4,10 +4,12 @@ export type AppPingResponse = {
 }
 
 export type Settings = {
-  version: 2
+  version: 3
   captureIntervalSeconds: number
   storageLimitRecordingsBytes: number
   storageLimitTimelapsesBytes: number
+  timelapsesEnabled: boolean
+  timelapseFps: number
 }
 
 export type CaptureState = {
@@ -142,6 +144,11 @@ export type IpcContract = {
       timelapsesBytes: number
     }
   }
+
+  'storage:resolveFileUrl': {
+    req: { relPath: string }
+    res: { fileUrl: string }
+  }
 }
 
 export const IPC_CHANNELS = {
@@ -165,7 +172,8 @@ export const IPC_CHANNELS = {
   reviewGetDay: 'review:getDay',
   reviewApplyRating: 'review:applyRating',
   storageGetUsage: 'storage:getUsage',
-  storagePurgeNow: 'storage:purgeNow'
+  storagePurgeNow: 'storage:purgeNow',
+  storageResolveFileUrl: 'storage:resolveFileUrl'
 } as const
 
 export const IPC_EVENTS = {

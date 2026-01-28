@@ -5,6 +5,7 @@ import { StorageService } from '../main/storage/storage'
 import { AnalysisService } from '../main/analysis/analysis'
 import { SettingsStore } from '../main/settings'
 import { dayKeyFromUnixSeconds } from '../shared/time'
+import { TimelapseService } from '../main/timelapse/timelapse'
 
 async function main() {
   const baseDir =
@@ -12,6 +13,9 @@ async function main() {
 
   const log = createLogger({ userDataPath: baseDir })
   const settings = new SettingsStore({ userDataPath: baseDir })
+  if (process.env.CHRONA_SMOKE_TIMELAPSE) {
+    await settings.update({ timelapsesEnabled: true })
+  }
   const storage = new StorageService({ userDataPath: baseDir })
   await storage.init()
 
@@ -33,6 +37,13 @@ async function main() {
   await storage.saveScreenshotJpeg({ capturedAtMs: startMs + 1900 * 1000, jpegBytes })
   await storage.saveScreenshotJpeg({ capturedAtMs: startMs + 2200 * 1000, jpegBytes })
 
+  const timelapse = new TimelapseService({
+    storage,
+    settings,
+    log,
+    events: { timelineUpdated: () => {} }
+  })
+
   const analysis = new AnalysisService({
     storage,
     log,
@@ -40,7 +51,8 @@ async function main() {
       analysisBatchUpdated: () => {},
       timelineUpdated: () => {}
     },
-    settings
+    settings,
+    timelapse
   })
 
   const before = await storage.fetchUnprocessedScreenshots({
@@ -54,6 +66,10 @@ async function main() {
 
   const firstBatch = recent[recent.length - 1]
   const cards = firstBatch ? await storage.fetchCardsForDay(dayKeyFromUnixSeconds(firstBatch.batchStartTs)) : []
+
+  if (process.env.CHRONA_SMOKE_TIMELAPSE) {
+    await timelapse.waitForIdle()
+  }
 
   // eslint-disable-next-line no-console
   console.log(
