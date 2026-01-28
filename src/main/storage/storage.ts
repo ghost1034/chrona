@@ -12,6 +12,22 @@ export type ScreenshotRow = {
   isDeleted: 0 | 1
 }
 
+export type TimelineCardRow = {
+  id: number
+  batchId: number | null
+  startTs: number
+  endTs: number
+  dayKey: string
+  title: string
+  summary: string | null
+  detailedSummary: string | null
+  category: string
+  subcategory: string | null
+  metadata: string | null
+  videoSummaryUrl: string | null
+  isDeleted: boolean
+}
+
 export type AnalysisBatchRow = {
   id: number
   batchStartTs: number
@@ -347,6 +363,45 @@ export class StorageService {
           'SELECT * FROM timeline_cards WHERE day = ? AND is_deleted = 0 ORDER BY start_ts ASC'
         )
         .all(dayKey) as any[]
+    })
+  }
+
+  async fetchTimelineCardById(cardId: number): Promise<TimelineCardRow | null> {
+    return this.enqueue(() => {
+      const db = this.mustDb()
+      const r = db.prepare('SELECT * FROM timeline_cards WHERE id = ?').get(cardId) as any
+      if (!r) return null
+      return mapTimelineCardRow(r)
+    })
+  }
+
+  async updateTimelineCardVideoSummaryUrl(opts: { cardId: number; relPath: string | null }): Promise<void> {
+    await this.enqueue(() => {
+      const db = this.mustDb()
+      db.prepare('UPDATE timeline_cards SET video_summary_url = ? WHERE id = ?').run(
+        opts.relPath,
+        opts.cardId
+      )
+    })
+  }
+
+  async fetchScreenshotsInRange(opts: {
+    startTs: number
+    endTs: number
+  }): Promise<ScreenshotRow[]> {
+    return this.enqueue(() => {
+      const db = this.mustDb()
+      const rows = db
+        .prepare(
+          `SELECT id, captured_at, file_path, file_size, is_deleted
+           FROM screenshots
+           WHERE is_deleted = 0
+             AND captured_at >= ?
+             AND captured_at <= ?
+           ORDER BY captured_at ASC`
+        )
+        .all(opts.startTs, opts.endTs) as any[]
+      return rows.map(mapScreenshotRow)
     })
   }
 
@@ -827,6 +882,24 @@ function mapScreenshotRow(r: any): ScreenshotRow {
     filePath: String(r.file_path),
     fileSize: r.file_size === null || r.file_size === undefined ? null : Number(r.file_size),
     isDeleted: Number(r.is_deleted) === 1 ? 1 : 0
+  }
+}
+
+function mapTimelineCardRow(r: any): TimelineCardRow {
+  return {
+    id: Number(r.id),
+    batchId: r.batch_id === null || r.batch_id === undefined ? null : Number(r.batch_id),
+    startTs: Number(r.start_ts),
+    endTs: Number(r.end_ts),
+    dayKey: String(r.day),
+    title: String(r.title),
+    summary: r.summary ?? null,
+    detailedSummary: r.detailed_summary ?? null,
+    category: String(r.category),
+    subcategory: r.subcategory ?? null,
+    metadata: r.metadata ?? null,
+    videoSummaryUrl: r.video_summary_url ?? null,
+    isDeleted: Number(r.is_deleted) === 1
   }
 }
 

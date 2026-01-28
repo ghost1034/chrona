@@ -17,6 +17,7 @@ export function App() {
 
   const [hasGeminiKey, setHasGeminiKey] = useState<boolean | null>(null)
   const [geminiKeyInput, setGeminiKeyInput] = useState<string>('')
+  const [timelapsesEnabled, setTimelapsesEnabled] = useState<boolean>(false)
 
   const [storageUsage, setStorageUsage] = useState<{
     recordingsBytes: number
@@ -37,6 +38,8 @@ export function App() {
     [cards, selectedCardId]
   )
 
+  const [selectedVideoUrl, setSelectedVideoUrl] = useState<string | null>(null)
+
   useEffect(() => {
     void (async () => {
       const state = await window.dayflow.getCaptureState()
@@ -49,6 +52,9 @@ export function App() {
 
       setDisplays(await window.dayflow.listDisplays())
       setHasGeminiKey((await window.dayflow.hasGeminiApiKey()).hasApiKey)
+
+      const settings = await window.dayflow.getSettings()
+      setTimelapsesEnabled(!!settings.timelapsesEnabled)
 
       const usage = await window.dayflow.getStorageUsage()
       setStorageUsage(usage)
@@ -86,7 +92,22 @@ export function App() {
   }, [])
 
   useEffect(() => {
-    void refreshDay(dayKey)
+    void (async () => {
+      if (!selectedCard || !selectedCard.videoSummaryUrl) {
+        setSelectedVideoUrl(null)
+        return
+      }
+      try {
+        const res = await window.dayflow.resolveFileUrl(selectedCard.videoSummaryUrl)
+        setSelectedVideoUrl(res.fileUrl)
+      } catch {
+        setSelectedVideoUrl(null)
+      }
+    })()
+  }, [selectedCardId])
+
+  useEffect(() => {
+    void refreshDay(dayKey, false)
   }, [dayKey])
 
   useEffect(() => {
@@ -97,15 +118,21 @@ export function App() {
   useEffect(() => {
     const unsub = window.dayflow.onTimelineUpdated((p) => {
       if (p.dayKey !== dayKey) return
-      void refreshDay(dayKey)
+      void refreshDay(dayKey, true)
     })
     return () => unsub()
   }, [dayKey])
 
-  async function refreshDay(k: string) {
+  async function refreshDay(k: string, preserveSelection: boolean) {
     const day = await window.dayflow.getTimelineDay(k)
-    setCards(resolveOverlapsForDisplay(day.cards))
-    setSelectedCardId(null)
+    const nextCards = resolveOverlapsForDisplay(day.cards)
+    setCards(nextCards)
+
+    setSelectedCardId((prev) => {
+      if (!preserveSelection) return null
+      if (prev === null) return null
+      return nextCards.some((c) => c.id === prev) ? prev : null
+    })
   }
 
   async function refreshReview(k: string) {
@@ -149,6 +176,11 @@ export function App() {
     })
     const usage = await window.dayflow.getStorageUsage()
     setStorageUsage(usage)
+  }
+
+  async function onToggleTimelapsesEnabled(enabled: boolean) {
+    setTimelapsesEnabled(enabled)
+    await window.dayflow.updateSettings({ timelapsesEnabled: enabled })
   }
 
   async function onPurgeNow() {
@@ -287,6 +319,13 @@ export function App() {
               <div className="sideMeta">
                 {formatClockAscii(selectedCard.startTs)} - {formatClockAscii(selectedCard.endTs)}
               </div>
+
+              {selectedVideoUrl ? (
+                <div className="block">
+                  <div className="label">Timelapse</div>
+                  <video className="video" controls src={selectedVideoUrl} />
+                </div>
+              ) : null}
 
               <div className="field">
                 <div className="label">Category</div>
@@ -456,6 +495,17 @@ export function App() {
                   <button className="btn" onClick={() => void onPurgeNow()}>
                     Purge now
                   </button>
+                </div>
+
+                <div className="row">
+                  <label className="pill">
+                    <input
+                      type="checkbox"
+                      checked={timelapsesEnabled}
+                      onChange={(e) => void onToggleTimelapsesEnabled(e.target.checked)}
+                    />
+                    Generate timelapses
+                  </label>
                 </div>
               </div>
 

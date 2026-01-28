@@ -10,6 +10,7 @@ import { CaptureService } from './capture/capture'
 import { IPC_EVENTS } from '../shared/ipc'
 import { AnalysisService } from './analysis/analysis'
 import { RetentionService } from './retention/retention'
+import { TimelapseService } from './timelapse/timelapse'
 
 let quitting = false
 let mainWindow: BrowserWindow | null = null
@@ -66,6 +67,17 @@ async function main() {
   })
   await capture.init()
 
+  const timelapse = new TimelapseService({
+    storage,
+    settings,
+    log,
+    events: {
+      timelineUpdated: (payload) => {
+        win.webContents.send(IPC_EVENTS.timelineUpdated, payload)
+      }
+    }
+  })
+
   const analysis = new AnalysisService({
     storage,
     log,
@@ -77,7 +89,8 @@ async function main() {
         win.webContents.send(IPC_EVENTS.timelineUpdated, payload)
       }
     },
-    settings
+    settings,
+    timelapse
   })
   analysis.start()
 

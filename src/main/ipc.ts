@@ -12,6 +12,7 @@ import { dayKeyFromUnixSeconds } from '../shared/time'
 import { dayWindowForDayKey } from '../shared/time'
 import { coverageByCardId } from '../shared/review'
 import type { RetentionService } from './retention/retention'
+import { pathToFileURL } from 'node:url'
 
 type Handler<K extends keyof IpcContract> = (
   req: IpcContract[K]['req']
@@ -136,6 +137,17 @@ export function registerIpc(opts: {
       recordingsBytes: usage.recordingsBytes,
       timelapsesBytes: usage.timelapsesBytes
     }
+  })
+
+  handle('storage:resolveFileUrl', async (req) => {
+    const path = await import('node:path')
+    const userData = opts.storage.getUserDataPath()
+    const abs = path.resolve(userData, req.relPath)
+    const rel = path.relative(userData, abs)
+    if (rel.startsWith('..') || path.isAbsolute(rel)) {
+      throw new Error('Invalid relPath')
+    }
+    return { fileUrl: pathToFileURL(abs).toString() }
   })
 }
 
