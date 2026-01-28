@@ -5,6 +5,7 @@ import { GeminiService } from '../gemini/gemini'
 import type { SettingsStore } from '../settings'
 import { getGeminiApiKey } from '../gemini/keychain'
 import { dayKeyFromUnixSeconds } from '../../shared/time'
+import type { TimelapseService } from '../timelapse/timelapse'
 
 type Events = {
   analysisBatchUpdated: (payload: { batchId: number; status: string; reason?: string | null }) => void
@@ -16,6 +17,7 @@ export class AnalysisService {
   private readonly log: Logger
   private readonly events: Events
   private readonly settings: SettingsStore
+  private readonly timelapse: TimelapseService
 
   private timer: NodeJS.Timeout | null = null
   private tickInFlight: Promise<{ createdBatchIds: number[]; unprocessedCount: number }> | null =
@@ -32,11 +34,18 @@ export class AnalysisService {
   private processingBatchId: number | null = null
   private readonly gemini: GeminiService
 
-  constructor(opts: { storage: StorageService; log: Logger; events: Events; settings: SettingsStore }) {
+  constructor(opts: {
+    storage: StorageService
+    log: Logger
+    events: Events
+    settings: SettingsStore
+    timelapse: TimelapseService
+  }) {
     this.storage = opts.storage
     this.log = opts.log
     this.events = opts.events
     this.settings = opts.settings
+    this.timelapse = opts.timelapse
     this.gemini = new GeminiService({ storage: opts.storage, log: opts.log })
   }
 
@@ -274,7 +283,7 @@ export class AnalysisService {
       }))
     })
 
-    await this.storage.replaceCardsInRange({
+    const replaceRes = await this.storage.replaceCardsInRange({
       fromTs: windowStartTs,
       toTs: windowEndTs,
       batchId,
@@ -290,6 +299,12 @@ export class AnalysisService {
       }))
     })
 
+    // Clean up any old timelapses from replaced cards.
+    void this.timelapse.deleteTimelapseFiles(replaceRes.removedVideoPaths)
+
+    // Generate timelapses asynchronously for new cards.
+    this.timelapse.enqueueCardIds(replaceRes.insertedCardIds)
+
     this.events.timelineUpdated({ dayKey: dayKeyFromUnixSeconds(windowEndTs) })
 
     await this.storage.setBatchStatus({ batchId, status: 'analyzed', reason: null })
@@ -303,7 +318,7 @@ export class AnalysisService {
     await this.storage.setBatchStatus({ batchId, status: 'failed', reason })
     this.events.analysisBatchUpdated({ batchId, status: 'failed', reason })
 
-    await this.storage.replaceCardsInRange({
+    const replaceRes = await this.storage.replaceCardsInRange({
       fromTs: batch.batchStartTs,
       toTs: batch.batchEndTs,
       batchId,
@@ -320,6 +335,8 @@ export class AnalysisService {
         }
       ]
     })
+
+    void this.timelapse.deleteTimelapseFiles(replaceRes.removedVideoPaths)
 
     this.events.timelineUpdated({ dayKey: dayKeyFromUnixSeconds(batch.batchEndTs) })
   }
