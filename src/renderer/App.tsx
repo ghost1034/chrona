@@ -18,6 +18,7 @@ export function App() {
   const [hasGeminiKey, setHasGeminiKey] = useState<boolean | null>(null)
   const [geminiKeyInput, setGeminiKeyInput] = useState<string>('')
   const [timelapsesEnabled, setTimelapsesEnabled] = useState<boolean>(false)
+  const [autoStartEnabled, setAutoStartEnabled] = useState<boolean>(false)
 
   const [storageUsage, setStorageUsage] = useState<{
     recordingsBytes: number
@@ -55,6 +56,7 @@ export function App() {
 
       const settings = await window.dayflow.getSettings()
       setTimelapsesEnabled(!!settings.timelapsesEnabled)
+      setAutoStartEnabled((await window.dayflow.getAutoStartEnabled()).enabled)
 
       const usage = await window.dayflow.getStorageUsage()
       setStorageUsage(usage)
@@ -181,6 +183,11 @@ export function App() {
   async function onToggleTimelapsesEnabled(enabled: boolean) {
     setTimelapsesEnabled(enabled)
     await window.dayflow.updateSettings({ timelapsesEnabled: enabled })
+  }
+
+  async function onToggleAutoStartEnabled(enabled: boolean) {
+    const res = await window.dayflow.setAutoStartEnabled(enabled)
+    setAutoStartEnabled(res.enabled)
   }
 
   async function onPurgeNow() {
@@ -505,6 +512,17 @@ export function App() {
                       onChange={(e) => void onToggleTimelapsesEnabled(e.target.checked)}
                     />
                     Generate timelapses
+                  </label>
+                </div>
+
+                <div className="row">
+                  <label className="pill">
+                    <input
+                      type="checkbox"
+                      checked={autoStartEnabled}
+                      onChange={(e) => void onToggleAutoStartEnabled(e.target.checked)}
+                    />
+                    Launch at login
                   </label>
                 </div>
               </div>

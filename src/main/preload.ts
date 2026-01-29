@@ -11,6 +11,8 @@ const invoke: Invoke = (channel, req) => ipcRenderer.invoke(channel, req)
 
 contextBridge.exposeInMainWorld('dayflow', {
   ping: () => invoke('app:ping', undefined),
+  getAutoStartEnabled: () => invoke('app:getAutoStart', undefined),
+  setAutoStartEnabled: (enabled: boolean) => invoke('app:setAutoStart', { enabled }),
   getSettings: () => invoke('settings:getAll', undefined),
   updateSettings: (patch: IpcContract['settings:update']['req']) =>
     invoke('settings:update', patch),
@@ -99,6 +101,8 @@ type InvokeResult<K extends keyof IpcContract> = Promise<IpcContract[K]['res']>
 
 export type DayflowApi = {
   ping: () => InvokeResult<'app:ping'>
+  getAutoStartEnabled: () => InvokeResult<'app:getAutoStart'>
+  setAutoStartEnabled: (enabled: boolean) => InvokeResult<'app:setAutoStart'>
   getSettings: () => InvokeResult<'settings:getAll'>
   updateSettings: (patch: IpcContract['settings:update']['req']) =>
     InvokeResult<'settings:update'>
