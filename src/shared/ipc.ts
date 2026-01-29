@@ -4,12 +4,13 @@ export type AppPingResponse = {
 }
 
 export type Settings = {
-  version: 3
+  version: 4
   captureIntervalSeconds: number
   storageLimitRecordingsBytes: number
   storageLimitTimelapsesBytes: number
   timelapsesEnabled: boolean
   timelapseFps: number
+  autoStartEnabled: boolean
 }
 
 export type CaptureState = {
@@ -33,6 +34,14 @@ export type IpcContract = {
   'app:ping': {
     req: void
     res: AppPingResponse
+  }
+  'app:getAutoStart': {
+    req: void
+    res: { enabled: boolean }
+  }
+  'app:setAutoStart': {
+    req: { enabled: boolean }
+    res: { enabled: boolean }
   }
   'settings:getAll': {
     req: void
@@ -153,6 +162,8 @@ export type IpcContract = {
 
 export const IPC_CHANNELS = {
   appPing: 'app:ping',
+  appGetAutoStart: 'app:getAutoStart',
+  appSetAutoStart: 'app:setAutoStart',
   settingsGetAll: 'settings:getAll',
   settingsUpdate: 'settings:update',
   captureGetState: 'capture:getState',

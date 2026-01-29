@@ -3,7 +3,7 @@ import type { IpcContract } from '../shared/ipc'
 import { SettingsStore } from './settings'
 import type { CaptureService } from './capture/capture'
 import type { StorageService } from './storage/storage'
-import { shell } from 'electron'
+import { app, shell } from 'electron'
 import type { AnalysisService } from './analysis/analysis'
 import { getGeminiApiKey, setGeminiApiKey } from './gemini/keychain'
 import { clipboard, dialog } from 'electron'
@@ -13,6 +13,8 @@ import { dayWindowForDayKey } from '../shared/time'
 import { coverageByCardId } from '../shared/review'
 import type { RetentionService } from './retention/retention'
 import { pathToFileURL } from 'node:url'
+import { applyAutoStart } from './autostart'
+import type { Logger } from './logger'
 
 type Handler<K extends keyof IpcContract> = (
   req: IpcContract[K]['req']
@@ -24,8 +26,27 @@ export function registerIpc(opts: {
   storage: StorageService
   analysis: AnalysisService
   retention: RetentionService
+  log: Logger
 }) {
   handle('app:ping', async () => ({ ok: true, nowTs: Math.floor(Date.now() / 1000) }))
+
+  handle('app:getAutoStart', async () => {
+    const s = await opts.settings.getAll()
+    return { enabled: !!s.autoStartEnabled }
+  })
+
+  handle('app:setAutoStart', async (req) => {
+    const enabled = !!req.enabled
+    await opts.settings.update({ autoStartEnabled: enabled })
+    applyAutoStart(enabled, opts.log)
+    // Use Electron's actual state if available.
+    try {
+      const st = app.getLoginItemSettings()
+      return { enabled: st.openAtLogin }
+    } catch {
+      return { enabled }
+    }
+  })
   handle('settings:getAll', async () => opts.settings.getAll())
   handle('settings:update', async (patch) => opts.settings.update(patch ?? {}))
 
