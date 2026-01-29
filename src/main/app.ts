@@ -11,15 +11,31 @@ import { IPC_EVENTS } from '../shared/ipc'
 import { AnalysisService } from './analysis/analysis'
 import { RetentionService } from './retention/retention'
 import { TimelapseService } from './timelapse/timelapse'
+import { DeepLinkService, extractDeepLinksFromArgv } from './deeplink/deeplink'
+import { applyAutoStart } from './autostart'
 
 let quitting = false
 let mainWindow: BrowserWindow | null = null
+let pendingDeepLinks: string[] = []
+let deepLinkHandler: ((url: string) => void) | null = null
+
+// macOS can deliver deep links before app is ready.
+app.on('open-url', (event, urlString) => {
+  event.preventDefault()
+  if (deepLinkHandler) deepLinkHandler(urlString)
+  else pendingDeepLinks.push(urlString)
+})
 
 function ensureSingleInstance(): boolean {
   const gotLock = app.requestSingleInstanceLock()
   if (!gotLock) return false
 
-  app.on('second-instance', () => {
+  app.on('second-instance', (_event, argv) => {
+    const urls = extractDeepLinksFromArgv(argv)
+    if (urls.length > 0) {
+      if (deepLinkHandler) urls.forEach((u) => deepLinkHandler?.(u))
+      else pendingDeepLinks.push(...urls)
+    }
     if (!mainWindow) return
     if (mainWindow.isMinimized()) mainWindow.restore()
     mainWindow.show()
@@ -42,6 +58,10 @@ async function main() {
   log.info('app.paths', { userData: app.getPath('userData') })
 
   const settings = new SettingsStore({ userDataPath: app.getPath('userData') })
+
+  // Apply autostart setting early.
+  const s0 = await settings.getAll()
+  applyAutoStart(!!s0.autoStartEnabled, log)
   const storage = new StorageService({ userDataPath: app.getPath('userData') })
   await storage.init()
 
@@ -66,6 +86,44 @@ async function main() {
     }
   })
   await capture.init()
+
+  const deepLinks = new DeepLinkService({
+    log,
+    onAction: (action) => {
+      switch (action) {
+        case 'start-recording':
+        case 'resume-recording':
+          void capture.setEnabled(true)
+          return
+        case 'stop-recording':
+        case 'pause-recording':
+          void capture.setEnabled(false)
+          return
+      }
+    }
+  })
+
+  deepLinkHandler = (urlString: string) => {
+    deepLinks.handleUrl(urlString)
+  }
+
+  // Cold start deep link (Windows/Linux argv)
+  pendingDeepLinks.push(...extractDeepLinksFromArgv(process.argv))
+  if (pendingDeepLinks.length > 0) {
+    pendingDeepLinks.forEach((u) => deepLinkHandler?.(u))
+    pendingDeepLinks = []
+  }
+
+  // Best-effort protocol registration.
+  try {
+    if (process.defaultApp) {
+      app.setAsDefaultProtocolClient('chrona', process.execPath, [process.argv[1]])
+    } else {
+      app.setAsDefaultProtocolClient('chrona')
+    }
+  } catch {
+    // ignore
+  }
 
   const timelapse = new TimelapseService({
     storage,
@@ -106,7 +164,7 @@ async function main() {
   })
   retention.start()
 
-  registerIpc({ settings, capture, storage, analysis, retention })
+  registerIpc({ settings, capture, storage, analysis, retention, log })
 
   win.webContents.on('render-process-gone', (_event, details) => {
     log.error('renderer.gone', { reason: details.reason, exitCode: details.exitCode })
