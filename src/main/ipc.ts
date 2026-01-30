@@ -12,7 +12,7 @@ import { dayKeyFromUnixSeconds } from '../shared/time'
 import { dayWindowForDayKey } from '../shared/time'
 import { coverageByCardId } from '../shared/review'
 import type { RetentionService } from './retention/retention'
-import { pathToFileURL } from 'node:url'
+import { toChronaMediaUrl } from './mediaProtocol'
 import { applyAutoStart } from './autostart'
 import type { Logger } from './logger'
 
@@ -168,7 +168,9 @@ export function registerIpc(opts: {
     if (rel.startsWith('..') || path.isAbsolute(rel)) {
       throw new Error('Invalid relPath')
     }
-    return { fileUrl: pathToFileURL(abs).toString() }
+    // Avoid returning file:// URLs to the renderer. Chromium blocks http(s) -> file:// loads
+    // (common during dev when using Vite), which breaks <video> playback.
+    return { fileUrl: toChronaMediaUrl(rel) }
   })
 }
 
