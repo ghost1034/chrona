@@ -9,7 +9,7 @@ const HOURS_IN_TIMELINE = 24
 const TIMELINE_GRID_PADDING_PX = 16
 const TIMELINE_ZOOM_DEFAULT_PX_PER_HOUR = 100
 const TIMELINE_ZOOM_MIN_PX_PER_HOUR = 50
-const TIMELINE_ZOOM_MAX_PX_PER_HOUR = 3200
+const TIMELINE_ZOOM_MAX_PX_PER_HOUR = 6400
 const TIMELINE_MIN_CARD_HEIGHT_PX = 12
 
 type TimelineMetrics = {
@@ -442,7 +442,7 @@ export function App() {
           <section className="timeline">
             <div className="timelineScroll" ref={timelineScrollRef}>
               <div className="timelineGrid" style={{ height: `${timelineMetrics.gridHeightPx}px` }}>
-                {renderHourTicks(windowInfo.startTs, timelinePxPerHour)}
+                {renderTimeTicks(windowInfo.startTs, timelinePxPerHour)}
                 {nowYpx !== null ? <div className="nowLine" style={{ top: `${nowYpx}px` }} /> : null}
 
                 {cards.map((c) => (
@@ -810,18 +810,35 @@ function resolveOverlapsForDisplay(cards: TimelineCardDTO[]): TimelineCardDTO[] 
   return out.filter((c) => c.endTs > c.startTs)
 }
 
-function renderHourTicks(windowStartTs: number, pxPerHourRaw: number) {
+function renderTimeTicks(windowStartTs: number, pxPerHourRaw: number) {
   const pxPerHour = clampTimelinePxPerHour(pxPerHourRaw)
+
+  const minutesStep =
+    pxPerHour >= 220 ? 15
+    : pxPerHour >= 140 ? 30
+    : 60
+
   const ticks: any[] = []
-  for (let i = 0; i <= HOURS_IN_TIMELINE; i++) {
-    const ts = windowStartTs + i * 3600
-    const y = TIMELINE_GRID_PADDING_PX + i * pxPerHour
+  const totalMinutes = HOURS_IN_TIMELINE * 60
+
+  for (let m = 0; m <= totalMinutes; m += minutesStep) {
+    const isHour = m % 60 === 0
+    const shouldLabel = isHour || (minutesStep >= 30 && pxPerHour >= 240 && m % 30 === 0)
+
+    const ts = windowStartTs + m * 60
+    const y = TIMELINE_GRID_PADDING_PX + (m / 60) * pxPerHour
+
     ticks.push(
-      <div key={i} className="tick" style={{ top: `${y}px` }}>
-        <div className="tickLabel">{formatClockAscii(ts)}</div>
+      <div
+        key={m}
+        className={`tick ${isHour ? 'major' : 'minor'}`}
+        style={{ top: `${y}px` }}
+      >
+        {shouldLabel ? <div className="tickLabel">{formatClockAscii(ts)}</div> : null}
       </div>
     )
   }
+
   return ticks
 }
 
