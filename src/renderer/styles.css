@@ -135,6 +135,11 @@ body {
   right: 0;
   height: 0;
   border-top: 1px solid rgba(255, 255, 255, 0.08);
+  z-index: 0;
+}
+
+.tick.minor {
+  border-top: 1px dashed rgba(255, 255, 255, 0.05);
 }
 
 .tickLabel {
