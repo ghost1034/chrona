@@ -2,6 +2,7 @@ import fs from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { spawn } from 'node:child_process'
+import { resolveFfmpegPath } from '../ffmpegPath'
 
 export async function buildCompressedTimelineVideo(opts: {
   ffmpegPath?: string
@@ -11,7 +12,7 @@ export async function buildCompressedTimelineVideo(opts: {
 }): Promise<void> {
   if (opts.inputJpegPaths.length === 0) throw new Error('No screenshots to build video')
 
-  const ffmpeg = opts.ffmpegPath ?? process.env.FFMPEG_PATH ?? 'ffmpeg'
+  const ffmpeg = opts.ffmpegPath ?? (await resolveFfmpegPath())
   const targetHeight = opts.targetHeight ?? 540
 
   const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'dayflow-ffmpeg-'))

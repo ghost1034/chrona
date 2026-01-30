@@ -4,6 +4,8 @@ reference/
 # Node/Electron
 node_modules/
 dist/
+.electron/
+release/
 .cache/
 .vite/
 

@@ -1,7 +1,9 @@
 {
   "name": "dayflow",
+  "description": "Records your screen and generates a timeline of your activities.",
   "private": true,
   "version": "0.0.0",
+  "author": "Dayflow",
   "type": "module",
   "main": "dist/main/app.cjs",
   "scripts": {
@@ -14,10 +16,16 @@
     "analysis:smoke": "npm run build:main && node dist/tools/analysis-smoke.cjs",
     "test": "cross-env TZ=America/Los_Angeles vitest run",
     "test:watch": "cross-env TZ=America/Los_Angeles vitest",
-    "typecheck": "tsc -p tsconfig.json --noEmit"
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "postinstall": "electron-builder install-app-deps",
+    "pack": "npm run build && electron-builder --dir",
+    "dist": "npm run build && electron-builder",
+    "dist:mac": "npm run build && electron-builder --mac",
+    "dist:win": "npm run build && electron-builder --win"
   },
   "dependencies": {
     "better-sqlite3": "^11.10.0",
+    "ffmpeg-static": "^5.2.0",
     "keytar": "^7.9.0",
     "react": "^19.1.0",
     "react-dom": "^19.1.0"
@@ -31,11 +39,38 @@
     "concurrently": "^9.1.2",
     "cross-env": "^7.0.3",
     "electron": "^34.1.1",
+    "electron-builder": "^25.1.8",
     "nodemon": "^3.1.9",
     "tsup": "^8.3.6",
     "typescript": "^5.7.3",
     "vite": "^6.0.11",
     "vitest": "^3.0.5",
     "wait-on": "^8.0.2"
+  },
+  "build": {
+    "appId": "com.dayflow.app",
+    "productName": "Dayflow",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "node_modules/**/*",
+      "package.json"
+    ],
+    "asar": true,
+    "mac": {
+      "category": "public.app-category.productivity",
+      "target": ["dmg", "zip"]
+    },
+    "win": {
+      "target": ["nsis", "zip"]
+    },
+    "protocols": [
+      {
+        "name": "Dayflow",
+        "schemes": ["dayflow"]
+      }
+    ]
   }
 }
