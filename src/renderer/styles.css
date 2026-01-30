@@ -168,15 +168,22 @@ body {
   background: rgba(0, 0, 0, 0.22);
   cursor: pointer;
   overflow: hidden;
+  z-index: 1;
 }
 
 .card:hover {
   border-color: rgba(255, 255, 255, 0.22);
+  z-index: 4;
 }
 
 .card.selected {
   border-color: rgba(59, 212, 178, 0.7);
   box-shadow: 0 0 0 1px rgba(59, 212, 178, 0.25);
+  z-index: 3;
+}
+
+.card.selected:hover {
+  z-index: 5;
 }
 
 .card.system {
