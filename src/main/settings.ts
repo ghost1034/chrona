@@ -9,7 +9,8 @@ const DEFAULT_SETTINGS: Settings = {
   storageLimitTimelapsesBytes: 10 * 1024 * 1024 * 1024,
   timelapsesEnabled: false,
   timelapseFps: 2,
-  autoStartEnabled: false
+  autoStartEnabled: false,
+  timelinePxPerHour: 100
 }
 
 export class SettingsStore {

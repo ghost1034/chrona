@@ -11,6 +11,7 @@ export type Settings = {
   timelapsesEnabled: boolean
   timelapseFps: number
   autoStartEnabled: boolean
+  timelinePxPerHour: number
 }
 
 export type CaptureState = {
