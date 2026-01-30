@@ -2,6 +2,7 @@ import fs from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { spawn } from 'node:child_process'
+import { resolveFfmpegPath } from '../ffmpegPath'
 
 export async function buildTimelapseFromJpegs(opts: {
   ffmpegPath?: string
@@ -15,7 +16,7 @@ export async function buildTimelapseFromJpegs(opts: {
   const frameDuration = 1 / fps
   const targetHeight = opts.targetHeight ?? 720
 
-  const ffmpeg = opts.ffmpegPath ?? process.env.FFMPEG_PATH ?? 'ffmpeg'
+  const ffmpeg = opts.ffmpegPath ?? (await resolveFfmpegPath())
   const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'chrona-timelapse-'))
   const listPath = path.join(tmpDir, 'inputs.txt')
 
