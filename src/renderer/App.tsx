@@ -1,9 +1,21 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { TimelineCardDTO } from '../shared/timeline'
 import { dayKeyFromUnixSeconds, dayWindowForDayKey, formatClockAscii } from '../shared/time'
 import { formatBytes } from '../shared/format'
 
 type DisplayInfo = { id: string; bounds: { width: number; height: number }; scaleFactor: number }
+
+const HOURS_IN_TIMELINE = 24
+const TIMELINE_GRID_PADDING_PX = 16
+const TIMELINE_ZOOM_DEFAULT_PX_PER_HOUR = 100
+const TIMELINE_ZOOM_MIN_PX_PER_HOUR = 50
+const TIMELINE_ZOOM_MAX_PX_PER_HOUR = 3200
+const TIMELINE_MIN_CARD_HEIGHT_PX = 12
+
+type TimelineMetrics = {
+  contentHeightPx: number
+  gridHeightPx: number
+}
 
 export function App() {
   const [interval, setInterval] = useState<number | null>(null)
@@ -34,6 +46,11 @@ export function App() {
   const [selectedCardId, setSelectedCardId] = useState<number | null>(null)
   const [view, setView] = useState<'timeline' | 'review'>('timeline')
   const [reviewCoverage, setReviewCoverage] = useState<Record<number, number>>({})
+
+  const [timelinePxPerHour, setTimelinePxPerHour] = useState<number>(TIMELINE_ZOOM_DEFAULT_PX_PER_HOUR)
+  const timelineScrollRef = useRef<HTMLDivElement | null>(null)
+  const didInitTimelineZoomRef = useRef<boolean>(false)
+  const saveTimelineZoomTimeoutRef = useRef<number | null>(null)
   const selectedCard = useMemo(
     () => cards.find((c) => c.id === selectedCardId) ?? null,
     [cards, selectedCardId]
@@ -56,6 +73,9 @@ export function App() {
 
       const settings = await window.dayflow.getSettings()
       setTimelapsesEnabled(!!settings.timelapsesEnabled)
+      setTimelinePxPerHour(
+        clampTimelinePxPerHour(settings.timelinePxPerHour ?? TIMELINE_ZOOM_DEFAULT_PX_PER_HOUR)
+      )
       setAutoStartEnabled((await window.dayflow.getAutoStartEnabled()).enabled)
 
       const usage = await window.dayflow.getStorageUsage()
@@ -111,6 +131,27 @@ export function App() {
   useEffect(() => {
     void refreshDay(dayKey, false)
   }, [dayKey])
+
+  useEffect(() => {
+    if (!didInitTimelineZoomRef.current) {
+      didInitTimelineZoomRef.current = true
+      return
+    }
+
+    if (saveTimelineZoomTimeoutRef.current !== null) {
+      window.clearTimeout(saveTimelineZoomTimeoutRef.current)
+    }
+
+    saveTimelineZoomTimeoutRef.current = window.setTimeout(() => {
+      void window.dayflow.updateSettings({ timelinePxPerHour })
+    }, 300)
+
+    return () => {
+      if (saveTimelineZoomTimeoutRef.current !== null) {
+        window.clearTimeout(saveTimelineZoomTimeoutRef.current)
+      }
+    }
+  }, [timelinePxPerHour])
 
   useEffect(() => {
     if (view !== 'review') return
@@ -226,12 +267,115 @@ export function App() {
     setDayKey(next)
   }
 
+  const timelineMetrics = useMemo(() => getTimelineMetrics(timelinePxPerHour), [timelinePxPerHour])
+
+  const applyZoom = useCallback(
+    (nextPxPerHourRaw: number, opts?: { anchorY?: number }) => {
+      const nextPxPerHour = clampTimelinePxPerHour(nextPxPerHourRaw)
+      if (nextPxPerHour === timelinePxPerHour) return
+
+      const scroller = timelineScrollRef.current
+      if (!scroller) {
+        setTimelinePxPerHour(nextPxPerHour)
+        return
+      }
+
+      const anchorY = opts?.anchorY ?? scroller.clientHeight / 2
+      const oldContentHeightPx = HOURS_IN_TIMELINE * timelinePxPerHour
+      const newContentHeightPx = HOURS_IN_TIMELINE * nextPxPerHour
+
+      const oldAnchorPosPx = scroller.scrollTop + anchorY
+      const progress = clampNumber(
+        (oldAnchorPosPx - TIMELINE_GRID_PADDING_PX) / oldContentHeightPx,
+        0,
+        1
+      )
+
+      setTimelinePxPerHour(nextPxPerHour)
+
+      requestAnimationFrame(() => {
+        const scroller2 = timelineScrollRef.current
+        if (!scroller2) return
+        const newAnchorPosPx = TIMELINE_GRID_PADDING_PX + progress * newContentHeightPx
+        scroller2.scrollTop = Math.max(0, newAnchorPosPx - anchorY)
+      })
+    },
+    [timelinePxPerHour]
+  )
+
+  const zoomIn = useCallback(
+    (anchorY?: number) => applyZoom(timelinePxPerHour + 10, { anchorY }),
+    [applyZoom, timelinePxPerHour]
+  )
+  const zoomOut = useCallback(
+    (anchorY?: number) => applyZoom(timelinePxPerHour - 10, { anchorY }),
+    [applyZoom, timelinePxPerHour]
+  )
+  const zoomReset = useCallback(
+    (anchorY?: number) => applyZoom(TIMELINE_ZOOM_DEFAULT_PX_PER_HOUR, { anchorY }),
+    [applyZoom]
+  )
+
+  useEffect(() => {
+    if (view !== 'timeline') return
+    const scroller = timelineScrollRef.current
+    if (!scroller) return
+
+    const onWheel = (e: WheelEvent) => {
+      if (!e.ctrlKey && !e.metaKey) return
+      if (e.deltaY === 0) return
+
+      e.preventDefault()
+      const rect = scroller.getBoundingClientRect()
+      const anchorY = e.clientY - rect.top
+
+      if (e.deltaY < 0) {
+        applyZoom(Math.round(timelinePxPerHour * 1.1), { anchorY })
+      } else {
+        applyZoom(Math.round(timelinePxPerHour / 1.1), { anchorY })
+      }
+    }
+
+    scroller.addEventListener('wheel', onWheel, { passive: false })
+    return () => scroller.removeEventListener('wheel', onWheel)
+  }, [applyZoom, timelinePxPerHour, view])
+
+  useEffect(() => {
+    if (view !== 'timeline') return
+
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (!e.ctrlKey && !e.metaKey) return
+
+      if (e.key === '0') {
+        e.preventDefault()
+        zoomReset()
+        return
+      }
+
+      // Cmd/Ctrl + is often reported as '=' with Shift.
+      if (e.key === '+' || e.key === '=') {
+        e.preventDefault()
+        zoomIn()
+        return
+      }
+
+      if (e.key === '-') {
+        e.preventDefault()
+        zoomOut()
+      }
+    }
+
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [view, zoomIn, zoomOut, zoomReset])
+
   const windowInfo = dayWindowForDayKey(dayKey)
   const isToday = dayKey === dayKeyFromUnixSeconds(Math.floor(Date.now() / 1000))
   const nowTs = Math.floor(Date.now() / 1000)
-  const nowPct = isToday
-    ? ((nowTs - windowInfo.startTs) / (windowInfo.endTs - windowInfo.startTs)) * 100
-    : null
+  const nowYpx =
+    isToday && nowTs >= windowInfo.startTs && nowTs <= windowInfo.endTs
+      ? timeToYpx(nowTs, windowInfo.startTs, windowInfo.endTs, timelineMetrics)
+      : null
 
   return (
     <div className="app">
@@ -254,6 +398,18 @@ export function App() {
           >
             Review
           </button>
+          <button className="btn" disabled={view !== 'timeline'} onClick={() => zoomOut()}>
+            Zoom -
+          </button>
+          <button className="btn" disabled={view !== 'timeline'} onClick={() => zoomIn()}>
+            Zoom +
+          </button>
+          <button className="btn" disabled={view !== 'timeline'} onClick={() => zoomReset()}>
+            Reset
+          </button>
+          <div className="pill" title="Timeline zoom">
+            Zoom {Math.round((timelinePxPerHour / TIMELINE_ZOOM_DEFAULT_PX_PER_HOUR) * 100)}%
+          </div>
           <button className="btn" onClick={() => shiftDay(-1)}>
             Prev
           </button>
@@ -284,18 +440,16 @@ export function App() {
       <main className="layout">
         {view === 'timeline' ? (
           <section className="timeline">
-            <div className="timelineScroll">
-              <div className="timelineGrid">
-                {renderHourTicks(windowInfo.startTs)}
-                {nowPct !== null && nowPct >= 0 && nowPct <= 100 ? (
-                  <div className="nowLine" style={{ top: `${nowPct}%` }} />
-                ) : null}
+            <div className="timelineScroll" ref={timelineScrollRef}>
+              <div className="timelineGrid" style={{ height: `${timelineMetrics.gridHeightPx}px` }}>
+                {renderHourTicks(windowInfo.startTs, timelinePxPerHour)}
+                {nowYpx !== null ? <div className="nowLine" style={{ top: `${nowYpx}px` }} /> : null}
 
                 {cards.map((c) => (
                   <div
                     key={c.id}
                     className={`card ${selectedCardId === c.id ? 'selected' : ''} ${c.category === 'System' ? 'system' : ''}`}
-                    style={cardStyle(c, windowInfo.startTs, windowInfo.endTs)}
+                    style={cardStyle(c, windowInfo.startTs, windowInfo.endTs, timelineMetrics)}
                     onClick={() => setSelectedCardId(c.id)}
                     role="button"
                     tabIndex={0}
@@ -574,22 +728,55 @@ function formatCaptureStatus(state: {
   return parts.join(' · ')
 }
 
-function cardStyle(c: TimelineCardDTO, windowStartTs: number, windowEndTs: number) {
-  const total = windowEndTs - windowStartTs
-  const start = clamp(c.startTs, windowStartTs, windowEndTs)
-  const end = clamp(c.endTs, windowStartTs, windowEndTs)
-  const top = ((start - windowStartTs) / total) * 100
-  const height = ((Math.max(end, start) - start) / total) * 100
-  return {
-    top: `${top}%`,
-    height: `${Math.max(0.4, height)}%`
-  }
-}
-
-function clamp(n: number, min: number, max: number): number {
+function clampNumber(n: number, min: number, max: number): number {
   if (n < min) return min
   if (n > max) return max
   return n
+}
+
+function clampTimelinePxPerHour(pxPerHour: number): number {
+  const n = Number(pxPerHour)
+  if (!Number.isFinite(n)) return TIMELINE_ZOOM_DEFAULT_PX_PER_HOUR
+  return clampNumber(Math.round(n), TIMELINE_ZOOM_MIN_PX_PER_HOUR, TIMELINE_ZOOM_MAX_PX_PER_HOUR)
+}
+
+function getTimelineMetrics(pxPerHourRaw: number): TimelineMetrics {
+  const pxPerHour = clampTimelinePxPerHour(pxPerHourRaw)
+  const contentHeightPx = HOURS_IN_TIMELINE * pxPerHour
+  return {
+    contentHeightPx,
+    gridHeightPx: contentHeightPx + TIMELINE_GRID_PADDING_PX * 2
+  }
+}
+
+function timeToYpx(ts: number, windowStartTs: number, windowEndTs: number, metrics: TimelineMetrics): number {
+  const total = windowEndTs - windowStartTs
+  if (total <= 0) return TIMELINE_GRID_PADDING_PX
+  const t = clampNumber(ts, windowStartTs, windowEndTs)
+  const progress = (t - windowStartTs) / total
+  return TIMELINE_GRID_PADDING_PX + progress * metrics.contentHeightPx
+}
+
+function cardStyle(
+  c: TimelineCardDTO,
+  windowStartTs: number,
+  windowEndTs: number,
+  metrics: TimelineMetrics
+) {
+  const total = windowEndTs - windowStartTs
+  if (total <= 0) return { top: '0px', height: `${TIMELINE_MIN_CARD_HEIGHT_PX}px` }
+
+  const start = clampNumber(c.startTs, windowStartTs, windowEndTs)
+  const end = clampNumber(c.endTs, windowStartTs, windowEndTs)
+  const clampedEnd = Math.max(end, start)
+
+  const top = TIMELINE_GRID_PADDING_PX + ((start - windowStartTs) / total) * metrics.contentHeightPx
+  const height = ((clampedEnd - start) / total) * metrics.contentHeightPx
+
+  return {
+    top: `${top}px`,
+    height: `${Math.max(TIMELINE_MIN_CARD_HEIGHT_PX, height)}px`
+  }
 }
 
 function resolveOverlapsForDisplay(cards: TimelineCardDTO[]): TimelineCardDTO[] {
@@ -623,13 +810,14 @@ function resolveOverlapsForDisplay(cards: TimelineCardDTO[]): TimelineCardDTO[] 
   return out.filter((c) => c.endTs > c.startTs)
 }
 
-function renderHourTicks(windowStartTs: number) {
+function renderHourTicks(windowStartTs: number, pxPerHourRaw: number) {
+  const pxPerHour = clampTimelinePxPerHour(pxPerHourRaw)
   const ticks: any[] = []
-  for (let i = 0; i <= 24; i++) {
+  for (let i = 0; i <= HOURS_IN_TIMELINE; i++) {
     const ts = windowStartTs + i * 3600
-    const y = (i / 24) * 100
+    const y = TIMELINE_GRID_PADDING_PX + i * pxPerHour
     ticks.push(
-      <div key={i} className="tick" style={{ top: `${y}%` }}>
+      <div key={i} className="tick" style={{ top: `${y}px` }}>
         <div className="tickLabel">{formatClockAscii(ts)}</div>
       </div>
     )
