@@ -13,11 +13,19 @@ import { RetentionService } from './retention/retention'
 import { TimelapseService } from './timelapse/timelapse'
 import { DeepLinkService, extractDeepLinksFromArgv } from './deeplink/deeplink'
 import { applyAutoStart } from './autostart'
+import { registerChronaMediaProtocol, registerChronaMediaScheme } from './mediaProtocol'
 
 let quitting = false
 let mainWindow: BrowserWindow | null = null
 let pendingDeepLinks: string[] = []
 let deepLinkHandler: ((url: string) => void) | null = null
+
+// Must happen before app is ready.
+try {
+  registerChronaMediaScheme()
+} catch {
+  // ignore
+}
 
 // macOS can deliver deep links before app is ready.
 app.on('open-url', (event, urlString) => {
@@ -64,6 +72,16 @@ async function main() {
   applyAutoStart(!!s0.autoStartEnabled, log)
   const storage = new StorageService({ userDataPath: app.getPath('userData') })
   await storage.init()
+
+  // Make local timelapse files available to the renderer in dev/prod.
+  // (http(s) -> file:// is blocked by Chromium, so use an app-controlled protocol)
+  try {
+    registerChronaMediaProtocol({ userDataPath: app.getPath('userData'), log })
+  } catch (e) {
+    log.warn('media.registerFailed', {
+      message: e instanceof Error ? e.message : String(e)
+    })
+  }
 
   const win = await createMainWindow()
   mainWindow = win
