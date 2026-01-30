@@ -23,12 +23,12 @@ export class AnalysisService {
   private tickInFlight: Promise<{ createdBatchIds: number[]; unprocessedCount: number }> | null =
     null
 
-  private readonly checkIntervalMs = 60_000
-  private readonly lookbackSec = 24 * 60 * 60
+  private readonly checkIntervalMs = 10_000          // was 60_000
+  private readonly lookbackSec = 2 * 60 * 60         // was 24 * 60 * 60
 
-  private readonly targetDurationSec = 30 * 60
-  private readonly maxGapSec = 5 * 60
-  private readonly minBatchDurationSec = 5 * 60
+  private readonly targetDurationSec = 5 * 60        // was 30 * 60
+  private readonly maxGapSec = 60                    // was 5 * 60
+  private readonly minBatchDurationSec = 60          // was 5 * 60
 
   private processingInFlight = false
   private processingBatchId: number | null = null
