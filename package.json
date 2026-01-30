@@ -72,5 +72,8 @@
         "schemes": ["chrona"]
       }
     ]
+  },
+  "overrides": {
+    "node-gyp": "^10.0.0"
   }
 }
