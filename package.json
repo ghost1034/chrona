@@ -72,5 +72,8 @@
         "schemes": ["dayflow"]
       }
     ]
+  },
+  "overrides": {
+    "node-gyp": "^10.0.0"
   }
 }
