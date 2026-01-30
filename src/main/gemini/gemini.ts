@@ -24,7 +24,7 @@ export class GeminiService {
     this.storage = opts.storage
     this.log = opts.log
     this.cfg = {
-      model: 'gemini-1.5-flash',
+      model: 'gemini-2.5-flash',
       requestTimeoutMs: 60_000,
       maxAttempts: 3,
       logBodies: false,
