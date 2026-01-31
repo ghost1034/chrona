@@ -7,10 +7,13 @@ type DisplayInfo = { id: string; bounds: { width: number; height: number }; scal
 
 const HOURS_IN_TIMELINE = 24
 const TIMELINE_GRID_PADDING_PX = 16
-const TIMELINE_ZOOM_DEFAULT_PX_PER_HOUR = 100
+const TIMELINE_ZOOM_DEFAULT_PX_PER_HOUR = 600
 const TIMELINE_ZOOM_MIN_PX_PER_HOUR = 50
-const TIMELINE_ZOOM_MAX_PX_PER_HOUR = 6400
-const TIMELINE_MIN_CARD_HEIGHT_PX = 12
+const TIMELINE_ZOOM_MAX_PX_PER_HOUR = 3600
+const TIMELINE_MIN_CARD_HEIGHT_PX = 1
+
+const CARD_TINY_MAX_HEIGHT_PX = 16
+const CARD_SMALL_MAX_HEIGHT_PX = 44
 
 type TimelineMetrics = {
   contentHeightPx: number
@@ -445,21 +448,31 @@ export function App() {
                 {renderTimeTicks(windowInfo.startTs, timelinePxPerHour)}
                 {nowYpx !== null ? <div className="nowLine" style={{ top: `${nowYpx}px` }} /> : null}
 
-                {cards.map((c) => (
-                  <div
-                    key={c.id}
-                    className={`card ${selectedCardId === c.id ? 'selected' : ''} ${c.category === 'System' ? 'system' : ''}`}
-                    style={cardStyle(c, windowInfo.startTs, windowInfo.endTs, timelineMetrics)}
-                    onClick={() => setSelectedCardId(c.id)}
-                    role="button"
-                    tabIndex={0}
-                  >
-                    <div className="cardTitle">{c.title}</div>
-                    <div className="cardMeta">
-                      {formatClockAscii(c.startTs)} - {formatClockAscii(c.endTs)} · {c.category}
+                {cards.map((c) => {
+                  const layout = cardLayout(c, windowInfo.startTs, windowInfo.endTs, timelineMetrics)
+                  return (
+                    <div
+                      key={c.id}
+                      className={`card ${layout.sizeClass} ${selectedCardId === c.id ? 'selected' : ''} ${c.category === 'System' ? 'system' : ''}`}
+                      style={layout.style}
+                      onClick={() => setSelectedCardId(c.id)}
+                      role="button"
+                      tabIndex={0}
+                    >
+                      <div className="cardTitle">{c.title}</div>
+                      <div className="cardMeta">
+                        {formatClockAscii(c.startTs)} - {formatClockAscii(c.endTs)} · {c.category}
+                      </div>
+
+                      <div className="cardHover" aria-hidden="true">
+                        <div className="cardHoverTitle">{c.title}</div>
+                        <div className="cardHoverMeta">
+                          {formatClockAscii(c.startTs)} - {formatClockAscii(c.endTs)} · {c.category}
+                        </div>
+                      </div>
                     </div>
-                  </div>
-                ))}
+                  )
+                })}
               </div>
             </div>
           </section>
@@ -571,6 +584,9 @@ export function App() {
                     onChange={(e) => setInterval(Number(e.target.value))}
                   />
                 </label>
+              </div>
+
+              <div className="row">
                 <button className="btn" onClick={onSaveInterval}>
                   Save
                 </button>
@@ -636,6 +652,9 @@ export function App() {
                       onChange={(e) => setLimitRecordingsGb(e.target.value)}
                     />
                   </label>
+                </div>
+
+                <div className="row">
                   <label className="label">
                     Timelapses limit (GB)
                     <input
@@ -757,14 +776,20 @@ function timeToYpx(ts: number, windowStartTs: number, windowEndTs: number, metri
   return TIMELINE_GRID_PADDING_PX + progress * metrics.contentHeightPx
 }
 
-function cardStyle(
+function cardLayout(
   c: TimelineCardDTO,
   windowStartTs: number,
   windowEndTs: number,
   metrics: TimelineMetrics
 ) {
   const total = windowEndTs - windowStartTs
-  if (total <= 0) return { top: '0px', height: `${TIMELINE_MIN_CARD_HEIGHT_PX}px` }
+  if (total <= 0) {
+    return {
+      style: { top: '0px', height: `${TIMELINE_MIN_CARD_HEIGHT_PX}px` },
+      heightPx: TIMELINE_MIN_CARD_HEIGHT_PX,
+      sizeClass: 'card--tiny'
+    }
+  }
 
   const start = clampNumber(c.startTs, windowStartTs, windowEndTs)
   const end = clampNumber(c.endTs, windowStartTs, windowEndTs)
@@ -772,42 +797,28 @@ function cardStyle(
 
   const top = TIMELINE_GRID_PADDING_PX + ((start - windowStartTs) / total) * metrics.contentHeightPx
   const height = ((clampedEnd - start) / total) * metrics.contentHeightPx
+  const heightPx = Math.max(TIMELINE_MIN_CARD_HEIGHT_PX, height)
+  const sizeClass =
+    heightPx <= CARD_TINY_MAX_HEIGHT_PX
+      ? 'card--tiny'
+      : heightPx <= CARD_SMALL_MAX_HEIGHT_PX
+        ? 'card--small'
+        : ''
 
   return {
-    top: `${top}px`,
-    height: `${Math.max(TIMELINE_MIN_CARD_HEIGHT_PX, height)}px`
+    style: {
+      top: `${top}px`,
+      height: `${heightPx}px`
+    },
+    heightPx,
+    sizeClass
   }
 }
 
 function resolveOverlapsForDisplay(cards: TimelineCardDTO[]): TimelineCardDTO[] {
-  const sorted = [...cards].sort((a, b) => a.startTs - b.startTs)
-  const out: TimelineCardDTO[] = []
-
-  for (const c of sorted) {
-    if (out.length === 0) {
-      out.push(c)
-      continue
-    }
-
-    const prev = out[out.length - 1]
-    if (c.startTs >= prev.endTs) {
-      out.push(c)
-      continue
-    }
-
-    const prevDur = prev.endTs - prev.startTs
-    const curDur = c.endTs - c.startTs
-
-    if (curDur <= prevDur) {
-      out[out.length - 1] = { ...prev, endTs: Math.max(prev.startTs, c.startTs) }
-      out.push(c)
-    } else {
-      const trimmedCurStart = Math.min(c.endTs, prev.endTs)
-      if (c.endTs > trimmedCurStart) out.push({ ...c, startTs: trimmedCurStart })
-    }
-  }
-
-  return out.filter((c) => c.endTs > c.startTs)
+  return [...cards]
+    .filter((c) => c.endTs > c.startTs)
+    .sort((a, b) => a.startTs - b.startTs)
 }
 
 function renderTimeTicks(windowStartTs: number, pxPerHourRaw: number) {
