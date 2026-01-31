@@ -7,7 +7,7 @@ const DEFAULT_SETTINGS: Settings = {
   captureIntervalSeconds: 10,
   storageLimitRecordingsBytes: 10 * 1024 * 1024 * 1024,
   storageLimitTimelapsesBytes: 10 * 1024 * 1024 * 1024,
-  timelapsesEnabled: false,
+  timelapsesEnabled: true,
   timelapseFps: 2,
   autoStartEnabled: false,
   timelinePxPerHour: 600
