@@ -245,7 +245,7 @@ export class AnalysisService {
     if (!batch) return
 
     const windowEndTs = batch.batchEndTs
-    const windowStartTs = windowEndTs - 3600
+    const windowStartTs = windowEndTs - 1200
 
     await this.storage.setBatchStatus({
       batchId,
