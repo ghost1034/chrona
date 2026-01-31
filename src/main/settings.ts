@@ -10,7 +10,7 @@ const DEFAULT_SETTINGS: Settings = {
   timelapsesEnabled: false,
   timelapseFps: 2,
   autoStartEnabled: false,
-  timelinePxPerHour: 100
+  timelinePxPerHour: 600
 }
 
 export class SettingsStore {
