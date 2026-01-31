@@ -76,10 +76,14 @@ function run(cmd: string, args: string[]): Promise<void> {
     p.stderr.on('data', (d) => {
       stderr += String(d)
     })
-    p.on('error', (e) => reject(e))
+    p.on('error', (e) => {
+      const code = (e as any)?.code
+      const codePart = code ? ` (${code})` : ''
+      reject(new Error(`Failed to spawn ffmpeg: ${cmd}${codePart}: ${e instanceof Error ? e.message : String(e)}`))
+    })
     p.on('close', (code) => {
       if (code === 0) return resolve()
-      reject(new Error(`ffmpeg exited with code ${code}: ${stderr.slice(0, 2000)}`))
+      reject(new Error(`ffmpeg exited with code ${code} (${cmd}): ${stderr.slice(0, 2000)}`))
     })
   })
 }
