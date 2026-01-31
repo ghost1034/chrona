@@ -59,6 +59,13 @@ async function main() {
     return
   }
 
+  // Ensure Cmd+Q / dock Quit actually quits.
+  // Without this, our window `close` handler treats the quit-driven close as a normal close
+  // and hides the window instead of letting the app exit.
+  app.on('before-quit', () => {
+    quitting = true
+  })
+
   await app.whenReady()
 
   const log = createLogger({ userDataPath: app.getPath('userData') })
