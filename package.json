@@ -59,6 +59,9 @@
       "package.json"
     ],
     "asar": true,
+    "asarUnpack": [
+      "**/node_modules/ffmpeg-static/**"
+    ],
     "mac": {
       "category": "public.app-category.productivity",
       "target": ["dmg", "zip"]
