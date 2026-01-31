@@ -73,8 +73,8 @@ body {
 }
 
 .timelineScroll {
-  height: calc(100vh - 160px);
-  min-height: 520px;
+  height: calc(100vh - 180px);
+  min-height: 500px;
   overflow: auto;
   border-radius: 14px;
 }
@@ -275,6 +275,8 @@ body {
 
 .sidePanel {
   padding: 14px;
+  max-height: calc(100vh - 180px);
+  overflow: auto;
 }
 
 .sideTitle {
@@ -394,6 +396,9 @@ body {
   }
   .timelineScroll {
     height: 60vh;
+  }
+  .sidePanel {
+    max-height: 60vh;
   }
   .row {
     flex-direction: column;
