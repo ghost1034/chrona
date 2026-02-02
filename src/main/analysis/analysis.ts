@@ -32,7 +32,6 @@ export class AnalysisService {
 
   private windowLookbackSec(): number {
     // Keep the same overlap property across batching retunes.
-    // Default batching target is 30m; using 2x yields a 60m sliding window.
     return 2 * this.targetDurationSec
   }
 
