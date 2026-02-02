@@ -24,16 +24,17 @@
     "dist:win": "npm run build && electron-builder --win --publish=never"
   },
   "dependencies": {
+    "@fontsource-variable/ibm-plex-sans": "^5.2.8",
+    "@fontsource/ibm-plex-mono": "^5.2.7",
     "better-sqlite3": "^11.10.0",
-    "@fontsource/ibm-plex-sans": "^5.2.8",
     "ffmpeg-static": "^5.2.0",
     "keytar": "^7.9.0",
     "react": "^19.1.0",
     "react-dom": "^19.1.0"
   },
   "devDependencies": {
-    "@types/node": "^22.13.1",
     "@types/better-sqlite3": "^7.6.11",
+    "@types/node": "^22.13.1",
     "@types/react": "^19.0.10",
     "@types/react-dom": "^19.0.4",
     "@vitejs/plugin-react": "^4.3.4",
@@ -65,15 +66,23 @@
     ],
     "mac": {
       "category": "public.app-category.productivity",
-      "target": ["dmg", "zip"]
+      "target": [
+        "dmg",
+        "zip"
+      ]
     },
     "win": {
-      "target": ["nsis", "zip"]
+      "target": [
+        "nsis",
+        "zip"
+      ]
     },
     "protocols": [
       {
         "name": "Chrona",
-        "schemes": ["chrona"]
+        "schemes": [
+          "chrona"
+        ]
       }
     ]
   },
