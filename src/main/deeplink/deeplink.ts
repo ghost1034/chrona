@@ -2,7 +2,7 @@ import type { Logger } from '../logger'
 
 export type DeepLinkAction = 'start-recording' | 'stop-recording' | 'pause-recording' | 'resume-recording'
 
-export function parseDayflowDeepLink(urlString: string): DeepLinkAction | null {
+export function parseChronaDeepLink(urlString: string): DeepLinkAction | null {
   let u: URL
   try {
     u = new URL(urlString)
@@ -10,11 +10,11 @@ export function parseDayflowDeepLink(urlString: string): DeepLinkAction | null {
     return null
   }
 
-  if (u.protocol !== 'dayflow:') return null
+  if (u.protocol !== 'chrona:') return null
 
-  // dayflow://start-recording -> host=start-recording
-  // dayflow://start-recording/ -> host=start-recording pathname=/
-  // dayflow:///start-recording -> host='' pathname=/start-recording
+  // chrona://start-recording -> host=start-recording
+  // chrona://start-recording/ -> host=start-recording pathname=/
+  // chrona:///start-recording -> host='' pathname=/start-recording
   const raw = `${u.host}${u.pathname}`
   const path = raw.replace(/^\/+/, '').replace(/\/+$/, '')
 
@@ -33,7 +33,7 @@ export function parseDayflowDeepLink(urlString: string): DeepLinkAction | null {
 }
 
 export function extractDeepLinksFromArgv(argv: string[]): string[] {
-  return argv.filter((a) => typeof a === 'string' && a.startsWith('dayflow://'))
+  return argv.filter((a) => typeof a === 'string' && a.startsWith('chrona://'))
 }
 
 export class DeepLinkService {
@@ -46,7 +46,7 @@ export class DeepLinkService {
   }
 
   handleUrl(urlString: string): boolean {
-    const action = parseDayflowDeepLink(urlString)
+    const action = parseChronaDeepLink(urlString)
     if (!action) return false
     this.log.info('deeplink.action', { action })
     this.onAction(action)

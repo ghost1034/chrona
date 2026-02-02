@@ -9,7 +9,7 @@ export function createTray(opts: {
   onQuit: () => void
 }): { tray: Tray; updateMenu: () => void } {
   const tray = new Tray(getFallbackIcon())
-  tray.setToolTip('Dayflow')
+  tray.setToolTip('Chrona')
 
   const updateMenu = () => {
     const state = opts.getCaptureState()
@@ -50,7 +50,7 @@ function buildTemplate(
     },
     { type: 'separator' },
     {
-      label: 'Open Dayflow',
+      label: 'Open Chrona',
       click: () => opts.onOpen()
     },
     {

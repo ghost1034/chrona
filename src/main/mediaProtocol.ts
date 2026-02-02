@@ -3,13 +3,13 @@ import { protocol } from 'electron'
 
 import type { Logger } from './logger'
 
-export const DAYFLOW_MEDIA_SCHEME = 'dayflow-media'
+export const CHRONA_MEDIA_SCHEME = 'chrona-media'
 
-export function registerDayflowMediaScheme(): void {
+export function registerChronaMediaScheme(): void {
   // Must be called before app is ready.
   protocol.registerSchemesAsPrivileged([
     {
-      scheme: DAYFLOW_MEDIA_SCHEME,
+      scheme: CHRONA_MEDIA_SCHEME,
       privileges: {
         standard: true,
         secure: true,
@@ -21,16 +21,16 @@ export function registerDayflowMediaScheme(): void {
   ])
 }
 
-export function registerDayflowMediaProtocol(opts: {
+export function registerChronaMediaProtocol(opts: {
   userDataPath: string
   log: Logger
 }): void {
-  protocol.registerFileProtocol(DAYFLOW_MEDIA_SCHEME, (request, callback) => {
+  protocol.registerFileProtocol(CHRONA_MEDIA_SCHEME, (request, callback) => {
     try {
       const u = new URL(request.url)
 
-      // We generate URLs in the form: dayflow-media:///timelapses/YYYY-MM-DD/<id>.mp4
-      // but Chromium sometimes requests them as: dayflow-media://timelapses/YYYY-MM-DD/<id>.mp4
+      // We generate URLs in the form: chrona-media:///timelapses/YYYY-MM-DD/<id>.mp4
+      // but Chromium sometimes requests them as: chrona-media://timelapses/YYYY-MM-DD/<id>.mp4
       // (treating the first path segment as the host). Accept both.
       const hostPart = u.host ? decodeURIComponent(u.host) : ''
       const pathPart = u.pathname ? decodeURIComponent(u.pathname) : ''
@@ -64,12 +64,12 @@ export function registerDayflowMediaProtocol(opts: {
   })
 }
 
-export function toDayflowMediaUrl(relPath: string): string {
+export function toChronaMediaUrl(relPath: string): string {
   const clean = relPath.replaceAll('\\\\', '/').replaceAll('\\', '/')
   const encoded = clean
     .split('/')
     .filter(Boolean)
     .map((seg) => encodeURIComponent(seg))
     .join('/')
-  return `${DAYFLOW_MEDIA_SCHEME}:///${encoded}`
+  return `${CHRONA_MEDIA_SCHEME}:///${encoded}`
 }

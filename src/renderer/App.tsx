@@ -63,7 +63,7 @@ export function App() {
 
   useEffect(() => {
     void (async () => {
-      const state = await window.dayflow.getCaptureState()
+      const state = await window.chrona.getCaptureState()
       setInterval(state.intervalSeconds)
       setRecording(state.desiredRecordingEnabled)
       setSystemPaused(state.isSystemPaused)
@@ -71,23 +71,23 @@ export function App() {
       setSelectedDisplayId(state.selectedDisplayId)
       setStatusLine(formatCaptureStatus(state))
 
-      setDisplays(await window.dayflow.listDisplays())
-      setHasGeminiKey((await window.dayflow.hasGeminiApiKey()).hasApiKey)
+      setDisplays(await window.chrona.listDisplays())
+      setHasGeminiKey((await window.chrona.hasGeminiApiKey()).hasApiKey)
 
-      const settings = await window.dayflow.getSettings()
+      const settings = await window.chrona.getSettings()
       setTimelapsesEnabled(!!settings.timelapsesEnabled)
       setTimelinePxPerHour(
         clampTimelinePxPerHour(settings.timelinePxPerHour ?? TIMELINE_ZOOM_DEFAULT_PX_PER_HOUR)
       )
-      setAutoStartEnabled((await window.dayflow.getAutoStartEnabled()).enabled)
+      setAutoStartEnabled((await window.chrona.getAutoStartEnabled()).enabled)
 
-      const usage = await window.dayflow.getStorageUsage()
+      const usage = await window.chrona.getStorageUsage()
       setStorageUsage(usage)
       setLimitRecordingsGb(String(Math.round(usage.recordingsLimitBytes / (1024 * 1024 * 1024))))
       setLimitTimelapsesGb(String(Math.round(usage.timelapsesLimitBytes / (1024 * 1024 * 1024))))
     })()
 
-    const unsubState = window.dayflow.onRecordingStateChanged((state) => {
+    const unsubState = window.chrona.onRecordingStateChanged((state) => {
       setInterval(state.intervalSeconds)
       setRecording(state.desiredRecordingEnabled)
       setSystemPaused(state.isSystemPaused)
@@ -96,15 +96,15 @@ export function App() {
       setStatusLine(formatCaptureStatus(state))
     })
 
-    const unsubErr = window.dayflow.onCaptureError((err) => {
+    const unsubErr = window.chrona.onCaptureError((err) => {
       setLastError(err.message)
     })
 
-    const unsubAnalysis = window.dayflow.onAnalysisBatchUpdated((p) => {
+    const unsubAnalysis = window.chrona.onAnalysisBatchUpdated((p) => {
       setAnalysisLine(`batch ${p.batchId}: ${p.status}${p.reason ? ` (${p.reason})` : ''}`)
     })
 
-    const unsubUsage = window.dayflow.onStorageUsageUpdated((u) => {
+    const unsubUsage = window.chrona.onStorageUsageUpdated((u) => {
       setStorageUsage(u)
     })
 
@@ -123,7 +123,7 @@ export function App() {
         return
       }
       try {
-        const res = await window.dayflow.resolveFileUrl(selectedCard.videoSummaryUrl)
+        const res = await window.chrona.resolveFileUrl(selectedCard.videoSummaryUrl)
         setSelectedVideoUrl(res.fileUrl)
       } catch {
         setSelectedVideoUrl(null)
@@ -146,7 +146,7 @@ export function App() {
     }
 
     saveTimelineZoomTimeoutRef.current = window.setTimeout(() => {
-      void window.dayflow.updateSettings({ timelinePxPerHour })
+      void window.chrona.updateSettings({ timelinePxPerHour })
     }, 300)
 
     return () => {
@@ -162,7 +162,7 @@ export function App() {
   }, [view, dayKey])
 
   useEffect(() => {
-    const unsub = window.dayflow.onTimelineUpdated((p) => {
+    const unsub = window.chrona.onTimelineUpdated((p) => {
       if (p.dayKey !== dayKey) return
       void refreshDay(dayKey, true)
     })
@@ -170,7 +170,7 @@ export function App() {
   }, [dayKey])
 
   async function refreshDay(k: string, preserveSelection: boolean) {
-    const day = await window.dayflow.getTimelineDay(k)
+    const day = await window.chrona.getTimelineDay(k)
     const nextCards = resolveOverlapsForDisplay(day.cards)
     setCards(nextCards)
 
@@ -182,32 +182,32 @@ export function App() {
   }
 
   async function refreshReview(k: string) {
-    const res = await window.dayflow.getReviewDay(k)
+    const res = await window.chrona.getReviewDay(k)
     setReviewCoverage(res.coverageByCardId)
   }
 
   async function onSaveInterval() {
     if (interval === null || !Number.isFinite(interval) || interval <= 0) return
-    const next = await window.dayflow.setCaptureInterval(interval)
+    const next = await window.chrona.setCaptureInterval(interval)
     setInterval(next.intervalSeconds)
   }
 
   async function onSelectDisplay(id: string) {
     const displayId = id === 'auto' ? null : id
     setSelectedDisplayId(displayId)
-    await window.dayflow.setSelectedDisplay(displayId)
+    await window.chrona.setSelectedDisplay(displayId)
   }
 
   async function onRunAnalysisTick() {
-    const res = await window.dayflow.runAnalysisTick()
+    const res = await window.chrona.runAnalysisTick()
     setAnalysisLine(`tick: created=${res.createdBatchIds.length} unprocessed=${res.unprocessedCount}`)
   }
 
   async function onSaveGeminiKey() {
     if (!geminiKeyInput.trim()) return
-    await window.dayflow.setGeminiApiKey(geminiKeyInput)
+    await window.chrona.setGeminiApiKey(geminiKeyInput)
     setGeminiKeyInput('')
-    setHasGeminiKey((await window.dayflow.hasGeminiApiKey()).hasApiKey)
+    setHasGeminiKey((await window.chrona.hasGeminiApiKey()).hasApiKey)
   }
 
   async function onSaveStorageLimits() {
@@ -216,50 +216,50 @@ export function App() {
     if (!Number.isFinite(recGb) || recGb <= 0) return
     if (!Number.isFinite(tlGb) || tlGb <= 0) return
 
-    await window.dayflow.updateSettings({
+    await window.chrona.updateSettings({
       storageLimitRecordingsBytes: Math.floor(recGb * 1024 * 1024 * 1024),
       storageLimitTimelapsesBytes: Math.floor(tlGb * 1024 * 1024 * 1024)
     })
-    const usage = await window.dayflow.getStorageUsage()
+    const usage = await window.chrona.getStorageUsage()
     setStorageUsage(usage)
   }
 
   async function onToggleTimelapsesEnabled(enabled: boolean) {
     setTimelapsesEnabled(enabled)
-    await window.dayflow.updateSettings({ timelapsesEnabled: enabled })
+    await window.chrona.updateSettings({ timelapsesEnabled: enabled })
   }
 
   async function onToggleAutoStartEnabled(enabled: boolean) {
-    const res = await window.dayflow.setAutoStartEnabled(enabled)
+    const res = await window.chrona.setAutoStartEnabled(enabled)
     setAutoStartEnabled(res.enabled)
   }
 
   async function onPurgeNow() {
-    const res = await window.dayflow.purgeStorageNow()
+    const res = await window.chrona.purgeStorageNow()
     setAnalysisLine(
       `purge: screenshots=${res.deletedScreenshotCount} timelapses=${res.deletedTimelapseCount} freed=${formatBytes(res.freedRecordingsBytes + res.freedTimelapsesBytes)}`
     )
-    const usage = await window.dayflow.getStorageUsage()
+    const usage = await window.chrona.getStorageUsage()
     setStorageUsage(usage)
   }
 
   async function onToggleRecording() {
-    const next = await window.dayflow.setRecordingEnabled(!recording)
+    const next = await window.chrona.setRecordingEnabled(!recording)
     setRecording(next.desiredRecordingEnabled)
     setSystemPaused(next.isSystemPaused)
     setStatusLine(formatCaptureStatus(next))
   }
 
   async function onCopyDay() {
-    await window.dayflow.copyDayToClipboard(dayKey)
+    await window.chrona.copyDayToClipboard(dayKey)
   }
 
   async function onExportDay() {
-    await window.dayflow.saveMarkdownRange(dayKey, dayKey)
+    await window.chrona.saveMarkdownRange(dayKey, dayKey)
   }
 
   async function onApplyRating(card: TimelineCardDTO, rating: 'focus' | 'neutral' | 'distracted') {
-    await window.dayflow.applyReviewRating(card.startTs, card.endTs, rating)
+    await window.chrona.applyReviewRating(card.startTs, card.endTs, rating)
     await refreshReview(dayKey)
   }
 
@@ -384,7 +384,7 @@ export function App() {
     <div className="app">
       <header className="header">
         <div className="brand">
-          <div className="wordmark">Dayflow</div>
+          <div className="wordmark">Chrona</div>
           <div className="tagline">Timeline · {dayKey}</div>
         </div>
 
@@ -512,7 +512,7 @@ export function App() {
                     setCards((prev) =>
                       prev.map((x) => (x.id === selectedCard.id ? { ...x, category } : x))
                     )
-                    void window.dayflow.updateTimelineCardCategory({
+                    void window.chrona.updateTimelineCardCategory({
                       cardId: selectedCard.id,
                       category,
                       subcategory: selectedCard.subcategory
@@ -538,7 +538,7 @@ export function App() {
                     setCards((prev) =>
                       prev.map((x) => (x.id === selectedCard.id ? { ...x, subcategory } : x))
                     )
-                    void window.dayflow.updateTimelineCardCategory({
+                    void window.chrona.updateTimelineCardCategory({
                       cardId: selectedCard.id,
                       category: selectedCard.category,
                       subcategory
@@ -590,7 +590,7 @@ export function App() {
                 <button className="btn" onClick={onSaveInterval}>
                   Save
                 </button>
-                <button className="btn" onClick={() => void window.dayflow.openRecordingsFolder()}>
+                <button className="btn" onClick={() => void window.chrona.openRecordingsFolder()}>
                   Open recordings
                 </button>
               </div>

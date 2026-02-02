@@ -160,7 +160,7 @@ export class AnalysisService {
     if (this.processingInFlight) return
 
     const apiKey = await getGeminiApiKey()
-    if (!apiKey && !process.env.DAYFLOW_GEMINI_MOCK) {
+    if (!apiKey && !process.env.CHRONA_GEMINI_MOCK) {
       // Leave batches as pending; user can add a key later.
       this.log.warn('analysis.geminiKeyMissing')
       return

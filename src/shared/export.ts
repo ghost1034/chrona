@@ -6,7 +6,7 @@ export function formatDayForClipboard(opts: {
   cards: TimelineCardDTO[]
 }): string {
   const lines: string[] = []
-  lines.push(`Dayflow timeline · ${opts.dayKey}`)
+  lines.push(`Chrona timeline · ${opts.dayKey}`)
   lines.push('')
 
   const cards = [...opts.cards].sort((a, b) => a.startTs - b.startTs)

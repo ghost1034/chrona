@@ -4,7 +4,7 @@ import { StorageService } from '../main/storage/storage'
 
 async function main() {
   const baseDir =
-    process.env.DAYFLOW_SMOKE_DIR ?? path.join(os.tmpdir(), `dayflow-smoke-${process.pid}`)
+    process.env.CHRONA_SMOKE_DIR ?? path.join(os.tmpdir(), `chrona-smoke-${process.pid}`)
 
   const storage = new StorageService({ userDataPath: baseDir })
   await storage.init()

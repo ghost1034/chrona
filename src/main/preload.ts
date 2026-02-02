@@ -9,7 +9,7 @@ type Invoke = <K extends keyof IpcContract>(
 
 const invoke: Invoke = (channel, req) => ipcRenderer.invoke(channel, req)
 
-contextBridge.exposeInMainWorld('dayflow', {
+contextBridge.exposeInMainWorld('chrona', {
   ping: () => invoke('app:ping', undefined),
   getAutoStartEnabled: () => invoke('app:getAutoStart', undefined),
   setAutoStartEnabled: (enabled: boolean) => invoke('app:setAutoStart', { enabled }),
@@ -99,7 +99,7 @@ contextBridge.exposeInMainWorld('dayflow', {
 
 type InvokeResult<K extends keyof IpcContract> = Promise<IpcContract[K]['res']>
 
-export type DayflowApi = {
+export type ChronaApi = {
   ping: () => InvokeResult<'app:ping'>
   getAutoStartEnabled: () => InvokeResult<'app:getAutoStart'>
   setAutoStartEnabled: (enabled: boolean) => InvokeResult<'app:setAutoStart'>
