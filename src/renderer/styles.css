@@ -10,7 +10,7 @@
   --accent: #3bd4b2;
   --accent2: #63a9ff;
   --shadow: rgba(0, 0, 0, 0.35);
-  font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica,
+  font-family: "IBM Plex Sans Variable", ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica,
     Arial, "Apple Color Emoji", "Segoe UI Emoji";
 }
 
@@ -22,6 +22,13 @@ body {
     radial-gradient(1000px 600px at 85% 15%, rgba(255, 179, 64, 0.16), transparent 60%),
     linear-gradient(180deg, var(--bg0), var(--bg1));
   color: var(--text);
+}
+
+button,
+input,
+select,
+textarea {
+  font-family: inherit;
 }
 
 .app {
@@ -349,7 +356,7 @@ body {
 }
 
 .mono {
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono",
+  font-family: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono",
     "Courier New", monospace;
   font-size: 12px;
   color: var(--muted);
