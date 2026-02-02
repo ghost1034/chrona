@@ -1,6 +1,6 @@
 import keytar from 'keytar'
 
-const SERVICE = 'com.dayflow'
+const SERVICE = 'com.chrona'
 const ACCOUNT = 'gemini_api_key'
 
 export async function setGeminiApiKey(apiKey: string): Promise<void> {
@@ -13,7 +13,7 @@ export async function getGeminiApiKey(): Promise<string | null> {
   const fromKeychain = await keytar.getPassword(SERVICE, ACCOUNT)
   if (fromKeychain && fromKeychain.trim()) return fromKeychain.trim()
 
-  const env = process.env.DAYFLOW_GEMINI_API_KEY
+  const env = process.env.CHRONA_GEMINI_API_KEY
   if (env && env.trim()) return env.trim()
   return null
 }

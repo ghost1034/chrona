@@ -1,24 +1,24 @@
 import { describe, expect, test } from 'vitest'
-import { extractDeepLinksFromArgv, parseDayflowDeepLink } from './deeplink'
+import { extractDeepLinksFromArgv, parseChronaDeepLink } from './deeplink'
 
-describe('parseDayflowDeepLink', () => {
+describe('parseChronaDeepLink', () => {
   test('parses host form', () => {
-    expect(parseDayflowDeepLink('dayflow://start-recording')).toBe('start-recording')
+    expect(parseChronaDeepLink('chrona://start-recording')).toBe('start-recording')
   })
 
   test('parses path form', () => {
-    expect(parseDayflowDeepLink('dayflow:///stop-recording')).toBe('stop-recording')
+    expect(parseChronaDeepLink('chrona:///stop-recording')).toBe('stop-recording')
   })
 
   test('rejects other protocols', () => {
-    expect(parseDayflowDeepLink('https://start-recording')).toBe(null)
+    expect(parseChronaDeepLink('https://start-recording')).toBe(null)
   })
 })
 
 describe('extractDeepLinksFromArgv', () => {
   test('filters argv', () => {
-    expect(extractDeepLinksFromArgv(['--foo', 'dayflow://start-recording'])).toEqual([
-      'dayflow://start-recording'
+    expect(extractDeepLinksFromArgv(['--foo', 'chrona://start-recording'])).toEqual([
+      'chrona://start-recording'
     ])
   })
 })

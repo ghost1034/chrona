@@ -1,4 +1,4 @@
-# Dayflow Cross-Platform Acceptance Criteria
+# Chrona Cross-Platform Acceptance Criteria
 
 This file defines what "done" means for each phase and the overall product, based on the invariants in `docs/NEW.md` and the phase plan in `docs/PLAN.md`.
 
@@ -107,8 +107,8 @@ Timelapses (optional feature, if enabled)
 
 Deep links + OS integration
 - Protocol handler supports at least:
-  - dayflow://start-recording
-  - dayflow://stop-recording
+  - chrona://start-recording
+  - chrona://stop-recording
 - Deep links work when app is running and on cold start.
 
 Packaging + QA

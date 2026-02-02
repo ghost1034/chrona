@@ -13,7 +13,7 @@ import { RetentionService } from './retention/retention'
 import { TimelapseService } from './timelapse/timelapse'
 import { DeepLinkService, extractDeepLinksFromArgv } from './deeplink/deeplink'
 import { applyAutoStart } from './autostart'
-import { registerDayflowMediaProtocol, registerDayflowMediaScheme } from './mediaProtocol'
+import { registerChronaMediaProtocol, registerChronaMediaScheme } from './mediaProtocol'
 
 let quitting = false
 let mainWindow: BrowserWindow | null = null
@@ -22,7 +22,7 @@ let deepLinkHandler: ((url: string) => void) | null = null
 
 // Must happen before app is ready.
 try {
-  registerDayflowMediaScheme()
+  registerChronaMediaScheme()
 } catch {
   // ignore
 }
@@ -83,7 +83,7 @@ async function main() {
   // Make local timelapse files available to the renderer in dev/prod.
   // (http(s) -> file:// is blocked by Chromium, so use an app-controlled protocol)
   try {
-    registerDayflowMediaProtocol({ userDataPath: app.getPath('userData'), log })
+    registerChronaMediaProtocol({ userDataPath: app.getPath('userData'), log })
   } catch (e) {
     log.warn('media.registerFailed', {
       message: e instanceof Error ? e.message : String(e)
@@ -142,9 +142,9 @@ async function main() {
   // Best-effort protocol registration.
   try {
     if (process.defaultApp) {
-      app.setAsDefaultProtocolClient('dayflow', process.execPath, [process.argv[1]])
+      app.setAsDefaultProtocolClient('chrona', process.execPath, [process.argv[1]])
     } else {
-      app.setAsDefaultProtocolClient('dayflow')
+      app.setAsDefaultProtocolClient('chrona')
     }
   } catch {
     // ignore

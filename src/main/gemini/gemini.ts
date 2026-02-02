@@ -40,11 +40,11 @@ export class GeminiService {
     screenshotIntervalSeconds: number
   }): Promise<{ observationsInserted: number }>{
     const apiKey = await getGeminiApiKey()
-    if (!apiKey && !process.env.DAYFLOW_GEMINI_MOCK) {
-      throw new Error('Missing Gemini API key (set DAYFLOW_GEMINI_API_KEY or store via keychain)')
+    if (!apiKey && !process.env.CHRONA_GEMINI_MOCK) {
+      throw new Error('Missing Gemini API key (set CHRONA_GEMINI_API_KEY or store via keychain)')
     }
 
-    if (process.env.DAYFLOW_GEMINI_MOCK) {
+    if (process.env.CHRONA_GEMINI_MOCK) {
       const mockJson = JSON.stringify({
         observations: [
           {
@@ -68,7 +68,7 @@ export class GeminiService {
     }
 
     const absJpegs = opts.screenshotRelPaths.map((p) => this.storage.resolveRelPath(p))
-    const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'dayflow-gemini-'))
+    const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'chrona-gemini-'))
     const videoPath = path.join(tmpDir, `batch-${opts.batchId}.mp4`)
 
     try {
@@ -179,11 +179,11 @@ export class GeminiService {
     }>
   }> {
     const apiKey = await getGeminiApiKey()
-    if (!apiKey && !process.env.DAYFLOW_GEMINI_MOCK) {
-      throw new Error('Missing Gemini API key (set DAYFLOW_GEMINI_API_KEY or store via keychain)')
+    if (!apiKey && !process.env.CHRONA_GEMINI_MOCK) {
+      throw new Error('Missing Gemini API key (set CHRONA_GEMINI_API_KEY or store via keychain)')
     }
 
-    if (process.env.DAYFLOW_GEMINI_MOCK) {
+    if (process.env.CHRONA_GEMINI_MOCK) {
       const endTs = Math.max(opts.windowStartTs + 60, opts.windowEndTs - 60)
       const startTs = Math.max(opts.windowStartTs, endTs - 15 * 60)
       const mockJson = JSON.stringify({

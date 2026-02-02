@@ -1,6 +1,6 @@
 # Testing Guide
 
-This document explains how to run Dayflow locally and how to test each phase/commit incrementally.
+This document explains how to run Chrona locally and how to test each phase/commit incrementally.
 
 Related docs:
 - `docs/ACCEPTANCE.md` (what "done" means)
@@ -21,17 +21,17 @@ Recommended:
 
 macOS notes:
 - Screen recording permission must be granted to capture screenshots.
-- Deep links via `dayflow://...` are most reliable from packaged builds.
+- Deep links via `chrona://...` are most reliable from packaged builds.
 
 Windows notes:
 - Multi-monitor capture works via Electron `desktopCapturer`, but you should test on at least one multi-monitor setup.
 
 ---
 
-## Getting oriented (where does Dayflow store data?)
+## Getting oriented (where does Chrona store data?)
 
-Dayflow stores everything under Electron `app.getPath('userData')`:
-- SQLite DB: `db/dayflow.sqlite`
+Chrona stores everything under Electron `app.getPath('userData')`:
+- SQLite DB: `db/chrona.sqlite`
 - Screenshots: `recordings/screenshots/YYYY-MM-DD/*.jpg`
 - Timelapses: `timelapses/YYYY-MM-DD/<cardId>.mp4`
 - Logs: `logs/app.log`
@@ -40,7 +40,7 @@ How to find the exact `userData` path on your machine:
 - Start the app; it logs `app.paths` to console and writes to `logs/app.log`.
 
 Resetting state between tests:
-- Quit Dayflow.
+- Quit Chrona.
 - Delete the entire `userData` directory (recommended when switching commits to avoid schema/behavior drift).
 
 ---
@@ -62,9 +62,9 @@ What you should see:
 - Quit from tray exits.
 
 Common dev environment variables:
-- `DAYFLOW_DEV_SERVER_URL=http://localhost:5173` (used by the dev script internally)
-- `DAYFLOW_GEMINI_API_KEY=...` (Gemini key fallback)
-- `DAYFLOW_GEMINI_MOCK=1` (bypass real Gemini calls)
+- `CHRONA_DEV_SERVER_URL=http://localhost:5173` (used by the dev script internally)
+- `CHRONA_GEMINI_API_KEY=...` (Gemini key fallback)
+- `CHRONA_GEMINI_MOCK=1` (bypass real Gemini calls)
 - `FFMPEG_PATH=/path/to/ffmpeg` (override ffmpeg binary)
 
 ---
@@ -84,9 +84,9 @@ Common dev environment variables:
   - `npm run db:smoke`
 
 - Analysis smoke test (creates synthetic screenshots and runs batching + pipeline):
-  - `DAYFLOW_GEMINI_MOCK=1 npm run analysis:smoke`
+  - `CHRONA_GEMINI_MOCK=1 npm run analysis:smoke`
   - Optional (tries timelapse generation; best with real screenshots):
-    - `DAYFLOW_GEMINI_MOCK=1 DAYFLOW_SMOKE_TIMELAPSE=1 npm run analysis:smoke`
+    - `CHRONA_GEMINI_MOCK=1 CHRONA_SMOKE_TIMELAPSE=1 npm run analysis:smoke`
 
 ---
 
@@ -108,8 +108,8 @@ Common dev environment variables:
   - Batches are created from unprocessed screenshots (24h lookback) and only when a full target batch exists.
   - You can force a tick from the UI ("Run analysis tick").
 - Gemini:
-  - In real mode: set your key in the UI or export `DAYFLOW_GEMINI_API_KEY`.
-  - In mock mode: set `DAYFLOW_GEMINI_MOCK=1` before starting the app.
+  - In real mode: set your key in the UI or export `CHRONA_GEMINI_API_KEY`.
+  - In mock mode: set `CHRONA_GEMINI_MOCK=1` before starting the app.
 
 ### 3) Timeline
 
@@ -152,13 +152,13 @@ Notes:
 
 Deep links (app running):
 - Use a second instance to send args:
-  - `npx electron . "dayflow://start-recording"`
-  - `npx electron . "dayflow://stop-recording"`
+  - `npx electron . "chrona://start-recording"`
+  - `npx electron . "chrona://stop-recording"`
 
 Deep links (packaged build):
 - Install/run a packaged build (see Phase 13 section below).
 - On macOS you can then try:
-  - `open "dayflow://start-recording"`
+  - `open "chrona://start-recording"`
 
 Auto-start:
 - Toggle "Launch at login".
@@ -183,7 +183,7 @@ Phase 1 (App shell)
 - Preload IPC works (UI can call a simple IPC method).
 
 Phase 2 (SQLite + filesystem)
-- DB created under `userData/db/dayflow.sqlite`.
+- DB created under `userData/db/chrona.sqlite`.
 - `npm run db:smoke` passes.
 
 Phase 3 (Time model)
@@ -194,15 +194,15 @@ Phase 4 (Capture)
 - Suspend/resume does not spam errors.
 
 Phase 5 (Batching + scheduler)
-- `DAYFLOW_GEMINI_MOCK=1 npm run analysis:smoke` creates batches.
+- `CHRONA_GEMINI_MOCK=1 npm run analysis:smoke` creates batches.
 - Verify trailing incomplete batch is dropped.
 
 Phase 6 (Transcribe -> observations)
-- With `DAYFLOW_GEMINI_MOCK=1`, a batch reaches `transcribed`.
+- With `CHRONA_GEMINI_MOCK=1`, a batch reaches `transcribed`.
 - With real key, verify `llm_calls` rows are created and API key is not logged.
 
 Phase 7 (Observations -> cards)
-- With `DAYFLOW_GEMINI_MOCK=1`, a batch reaches `analyzed` and inserts cards.
+- With `CHRONA_GEMINI_MOCK=1`, a batch reaches `analyzed` and inserts cards.
 - Force an error (e.g. unset key and disable mock) and confirm a System/Error card appears.
 
 Phase 8 (Timeline UI + export)
