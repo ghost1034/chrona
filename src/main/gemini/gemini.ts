@@ -414,7 +414,7 @@ function buildCardGenerationPrompt(opts: {
     'Rules:',
     '- Use unix seconds for startTs/endTs.',
     '- Each card must satisfy endTs > startTs.',
-    '- Keep all cards within the Window.',
+    '- Each card must overlap the Window. Prefer cards within the Window; extend outside only when needed for continuity with existing cards.',
     '- Do not output any text outside the JSON.'
   ].join('\n')
 }
