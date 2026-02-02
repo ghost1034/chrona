@@ -44,11 +44,13 @@ export function parseAndValidateCardsJson(opts: {
     if (!title) continue
     if (!allowed.has(category)) continue
 
-    const clampedStart = clamp(startTs, opts.windowStartTs, opts.windowEndTs)
-    const clampedEnd = clamp(endTs, opts.windowStartTs, opts.windowEndTs)
-    const s = Math.min(clampedStart, clampedEnd)
-    const e = Math.max(clampedStart, clampedEnd)
+    const s = Math.min(startTs, endTs)
+    const e = Math.max(startTs, endTs)
     if (e <= s) continue
+
+    // Keep only cards that intersect the requested window.
+    // (Cards may extend outside the window for continuity, but must overlap it.)
+    if (e <= opts.windowStartTs || s >= opts.windowEndTs) continue
 
     const subcategory = (c as any).subcategory
     const summary = (c as any).summary
@@ -88,12 +90,6 @@ export function stripCodeFences(s: string): string {
   const m = /^```(?:json)?\s*([\s\S]*?)\s*```$/i.exec(trimmed)
   if (m) return m[1].trim()
   return s
-}
-
-function clamp(n: number, min: number, max: number): number {
-  if (n < min) return min
-  if (n > max) return max
-  return n
 }
 
 function normalizeNullableString(v: unknown): string | null {
