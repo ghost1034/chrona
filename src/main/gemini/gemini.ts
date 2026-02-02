@@ -162,6 +162,7 @@ export class GeminiService {
       startTs: number
       endTs: number
       category: string
+      subcategory?: string | null
       title: string
       summary?: string | null
     }>
@@ -390,7 +391,14 @@ function buildCardGenerationPrompt(opts: {
   windowStartTs: number
   windowEndTs: number
   observations: Array<{ startTs: number; endTs: number; observation: string }>
-  contextCards: Array<{ startTs: number; endTs: number; category: string; title: string; summary?: string | null }>
+  contextCards: Array<{
+    startTs: number
+    endTs: number
+    category: string
+    subcategory?: string | null
+    title: string
+    summary?: string | null
+  }>
 }): string {
   return [
     'Return valid JSON only.',
@@ -405,7 +413,7 @@ function buildCardGenerationPrompt(opts: {
     'Observations (JSON array):',
     JSON.stringify(opts.observations),
     '',
-    'Existing cards in the window for continuity (JSON array):',
+    'Existing cards overlapping the window (for continuity and stability) (JSON array):',
     JSON.stringify(opts.contextCards),
     '',
     'Output format:',
@@ -414,7 +422,9 @@ function buildCardGenerationPrompt(opts: {
     'Rules:',
     '- Use unix seconds for startTs/endTs.',
     '- Each card must satisfy endTs > startTs.',
-    '- Each card must overlap the Window. Prefer cards within the Window; extend outside only when needed for continuity with existing cards.',
+    '- Stability matters: prefer to reuse existing card titles/categories/subcategories and keep their boundaries unless observations clearly contradict them.',
+    '- Prefer minimal changes near the seam: do not shift a boundary or rename an activity unless there is strong evidence in observations.',
+    '- Each card must overlap the Window. Prefer cards within the Window; extend outside only when needed to avoid truncating an activity that clearly continues across the seam.',
     '- Do not output any text outside the JSON.'
   ].join('\n')
 }
