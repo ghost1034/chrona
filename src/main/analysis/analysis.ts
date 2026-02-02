@@ -30,6 +30,12 @@ export class AnalysisService {
   private readonly maxGapSec = 2 * 60
   private readonly minBatchDurationSec = 2 * 60
 
+  private windowLookbackSec(): number {
+    // Keep the same overlap property across batching retunes.
+    // Default batching target is 30m; using 2x yields a 60m sliding window.
+    return 2 * this.targetDurationSec
+  }
+
   private processingInFlight = false
   private processingBatchId: number | null = null
   private readonly gemini: GeminiService
@@ -245,7 +251,7 @@ export class AnalysisService {
     if (!batch) return
 
     const windowEndTs = batch.batchEndTs
-    const windowStartTs = windowEndTs - 1200
+    const windowStartTs = Math.max(0, windowEndTs - this.windowLookbackSec())
 
     await this.storage.setBatchStatus({
       batchId,
@@ -278,6 +284,7 @@ export class AnalysisService {
         startTs: Number(c.start_ts),
         endTs: Number(c.end_ts),
         category: String(c.category),
+        subcategory: c.subcategory ?? null,
         title: String(c.title),
         summary: c.summary ?? null
       }))
@@ -305,7 +312,7 @@ export class AnalysisService {
     // Generate timelapses asynchronously for new cards.
     this.timelapse.enqueueCardIds(replaceRes.insertedCardIds)
 
-    this.events.timelineUpdated({ dayKey: dayKeyFromUnixSeconds(windowEndTs) })
+    this.emitTimelineUpdatedForRange(windowStartTs, windowEndTs)
 
     await this.storage.setBatchStatus({ batchId, status: 'analyzed', reason: null })
     this.events.analysisBatchUpdated({ batchId, status: 'analyzed' })
@@ -338,6 +345,13 @@ export class AnalysisService {
 
     void this.timelapse.deleteTimelapseFiles(replaceRes.removedVideoPaths)
 
-    this.events.timelineUpdated({ dayKey: dayKeyFromUnixSeconds(batch.batchEndTs) })
+    this.emitTimelineUpdatedForRange(batch.batchStartTs, batch.batchEndTs)
+  }
+
+  private emitTimelineUpdatedForRange(startTs: number, endTs: number) {
+    const a = dayKeyFromUnixSeconds(startTs)
+    const b = dayKeyFromUnixSeconds(endTs)
+    this.events.timelineUpdated({ dayKey: a })
+    if (b !== a) this.events.timelineUpdated({ dayKey: b })
   }
 }
