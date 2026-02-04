@@ -164,6 +164,14 @@ export type IpcContract = {
     req: import('./ask').AskRunRequest
     res: import('./ask').AskRunResponse
   }
+
+  'dashboard:get': {
+    req: {
+      scope: { startTs: number; endTs: number }
+      options?: { includeSystem?: boolean }
+    }
+    res: import('./dashboard').DashboardStatsDTO
+  }
 }
 
 export const IPC_CHANNELS = {
@@ -191,7 +199,8 @@ export const IPC_CHANNELS = {
   storageGetUsage: 'storage:getUsage',
   storagePurgeNow: 'storage:purgeNow',
   storageResolveFileUrl: 'storage:resolveFileUrl',
-  askRun: 'ask:run'
+  askRun: 'ask:run',
+  dashboardGet: 'dashboard:get'
 } as const
 
 export const IPC_EVENTS = {
