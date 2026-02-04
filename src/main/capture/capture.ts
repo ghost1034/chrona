@@ -50,6 +50,7 @@ export class CaptureService {
   async init(): Promise<void> {
     const s = await this.settings.getAll()
     this.intervalSeconds = s.captureIntervalSeconds
+    this.selectedDisplayId = s.captureSelectedDisplayId
 
     powerMonitor.on('suspend', () => this.setSystemPaused(true))
     powerMonitor.on('resume', () => this.setSystemPaused(false))
@@ -101,6 +102,7 @@ export class CaptureService {
 
   async setSelectedDisplay(displayId: string | null): Promise<CaptureState> {
     this.selectedDisplayId = displayId
+    await this.settings.update({ captureSelectedDisplayId: displayId })
     this.pendingDisplayId = null
     this.pendingDisplaySinceMs = null
     this.log.info('capture.setSelectedDisplay', { displayId })

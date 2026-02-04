@@ -26,9 +26,9 @@ export class AnalysisService {
   private readonly checkIntervalMs = 60_000
   private readonly lookbackSec = 24 * 60 * 60
 
-  private readonly targetDurationSec = 10 * 60
-  private readonly maxGapSec = 2 * 60
-  private readonly minBatchDurationSec = 2 * 60
+  private readonly targetDurationSec = 30 * 60
+  private readonly maxGapSec = 5 * 60
+  private readonly minBatchDurationSec = 5 * 60
 
   private windowLookbackSec(): number {
     // Keep the same overlap property across batching retunes.
@@ -51,7 +51,7 @@ export class AnalysisService {
     this.events = opts.events
     this.settings = opts.settings
     this.timelapse = opts.timelapse
-    this.gemini = new GeminiService({ storage: opts.storage, log: opts.log })
+    this.gemini = new GeminiService({ storage: opts.storage, log: opts.log, settings: opts.settings })
   }
 
   start() {

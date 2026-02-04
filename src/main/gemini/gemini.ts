@@ -7,6 +7,7 @@ import type { StorageService } from '../storage/storage'
 import { buildCompressedTimelineVideo } from './video'
 import { parseAndExpandTranscriptionJson } from './transcription'
 import { parseAndValidateCardsJson, stripCodeFences } from './cards'
+import type { SettingsStore } from '../settings'
 
 export type GeminiConfig = {
   model: string
@@ -19,16 +20,41 @@ export class GeminiService {
   private readonly storage: StorageService
   private readonly log: Logger
   private readonly cfg: GeminiConfig
+  private readonly settings: SettingsStore | null
 
-  constructor(opts: { storage: StorageService; log: Logger; cfg?: Partial<GeminiConfig> }) {
+  constructor(opts: {
+    storage: StorageService
+    log: Logger
+    settings?: SettingsStore
+    cfg?: Partial<GeminiConfig>
+  }) {
     this.storage = opts.storage
     this.log = opts.log
+    this.settings = opts.settings ?? null
     this.cfg = {
       model: 'gemini-2.5-flash',
       requestTimeoutMs: 60_000,
       maxAttempts: 3,
       logBodies: false,
       ...opts.cfg
+    }
+  }
+
+  private async resolveConfig(): Promise<GeminiConfig> {
+    if (!this.settings) return this.cfg
+    const s = await this.settings.getAll()
+    return {
+      ...this.cfg,
+      model: String(s.geminiModel || this.cfg.model),
+      requestTimeoutMs:
+        Number.isFinite(s.geminiRequestTimeoutMs) && s.geminiRequestTimeoutMs > 0
+          ? Math.floor(s.geminiRequestTimeoutMs)
+          : this.cfg.requestTimeoutMs,
+      maxAttempts:
+        Number.isFinite(s.geminiMaxAttempts) && s.geminiMaxAttempts > 0
+          ? Math.floor(s.geminiMaxAttempts)
+          : this.cfg.maxAttempts,
+      logBodies: !!s.geminiLogBodies
     }
   }
 
@@ -39,6 +65,8 @@ export class GeminiService {
     screenshotRelPaths: string[]
     screenshotIntervalSeconds: number
   }): Promise<{ observationsInserted: number }>{
+    const cfg = await this.resolveConfig()
+    const settings = this.settings ? await this.settings.getAll() : null
     const apiKey = await getGeminiApiKey()
     if (!apiKey && !process.env.CHRONA_GEMINI_MOCK) {
       throw new Error('Missing Gemini API key (set CHRONA_GEMINI_API_KEY or store via keychain)')
@@ -80,12 +108,13 @@ export class GeminiService {
 
       const videoBytes = await fs.readFile(videoPath)
       const videoBase64 = videoBytes.toString('base64')
-      const url = `https://generativelanguage.googleapis.com/v1beta/models/${this.cfg.model}:generateContent?key=${encodeURIComponent(
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/${cfg.model}:generateContent?key=${encodeURIComponent(
         apiKey!
       )}`
 
       const prompt = buildTranscriptionPrompt({
-        screenshotIntervalSeconds: opts.screenshotIntervalSeconds
+        screenshotIntervalSeconds: opts.screenshotIntervalSeconds,
+        preamble: settings?.promptPreambleTranscribe ?? ''
       })
 
       const requestBody = {
@@ -111,12 +140,13 @@ export class GeminiService {
       const callGroupId = `batch:${opts.batchId}:transcribe:${Date.now()}`
 
       const { text, latencyMs, httpStatus } = await this.fetchWithRetry({
+        cfg,
         url,
         method: 'POST',
         body: JSON.stringify(requestBody),
         callGroupId,
         batchId: opts.batchId,
-        model: this.cfg.model,
+        model: cfg.model,
         operation: 'transcribe'
       })
 
@@ -126,7 +156,7 @@ export class GeminiService {
         batchStartTs: opts.batchStartTs,
         batchEndTs: opts.batchEndTs,
         screenshotIntervalSeconds: opts.screenshotIntervalSeconds,
-        llmModel: this.cfg.model
+        llmModel: cfg.model
       })
 
       await this.storage.insertObservations(opts.batchId, parsed.observations)
@@ -136,15 +166,15 @@ export class GeminiService {
         callGroupId,
         attempt: 1,
         provider: 'gemini',
-        model: this.cfg.model,
+        model: cfg.model,
         operation: 'transcribe_parse',
         status: 'success',
         latencyMs,
         httpStatus,
         requestMethod: 'POST',
         requestUrl: redactKeyInUrl(url),
-        requestBody: this.cfg.logBodies ? JSON.stringify(requestBody) : null,
-        responseBody: this.cfg.logBodies ? stripCodeFences(extracted) : null
+        requestBody: cfg.logBodies ? JSON.stringify(requestBody) : null,
+        responseBody: cfg.logBodies ? stripCodeFences(extracted) : null
       })
 
       return { observationsInserted: parsed.observations.length }
@@ -178,6 +208,8 @@ export class GeminiService {
       metadata?: string | null
     }>
   }> {
+    const cfg = await this.resolveConfig()
+    const settings = this.settings ? await this.settings.getAll() : null
     const apiKey = await getGeminiApiKey()
     if (!apiKey && !process.env.CHRONA_GEMINI_MOCK) {
       throw new Error('Missing Gemini API key (set CHRONA_GEMINI_API_KEY or store via keychain)')
@@ -219,7 +251,7 @@ export class GeminiService {
       }
     }
 
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${this.cfg.model}:generateContent?key=${encodeURIComponent(
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${cfg.model}:generateContent?key=${encodeURIComponent(
       apiKey!
     )}`
 
@@ -227,7 +259,8 @@ export class GeminiService {
       windowStartTs: opts.windowStartTs,
       windowEndTs: opts.windowEndTs,
       observations: opts.observations,
-      contextCards: opts.contextCards
+      contextCards: opts.contextCards,
+      preamble: settings?.promptPreambleCards ?? ''
     })
 
     const requestBody = {
@@ -240,12 +273,13 @@ export class GeminiService {
     const callGroupId = `batch:${opts.batchId}:generate_cards:${Date.now()}`
 
     const { text, latencyMs, httpStatus } = await this.fetchWithRetry({
+      cfg,
       url,
       method: 'POST',
       body: JSON.stringify(requestBody),
       callGroupId,
       batchId: opts.batchId,
-      model: this.cfg.model,
+      model: cfg.model,
       operation: 'generate_cards'
     })
 
@@ -264,15 +298,15 @@ export class GeminiService {
       callGroupId,
       attempt: 1,
       provider: 'gemini',
-      model: this.cfg.model,
+      model: cfg.model,
       operation: 'generate_cards_parse',
       status: 'success',
       latencyMs,
       httpStatus,
       requestMethod: 'POST',
       requestUrl: redactKeyInUrl(url),
-      requestBody: this.cfg.logBodies ? JSON.stringify(requestBody) : null,
-      responseBody: this.cfg.logBodies ? extracted : null
+      requestBody: cfg.logBodies ? JSON.stringify(requestBody) : null,
+      responseBody: cfg.logBodies ? extracted : null
     })
 
     return {
@@ -296,6 +330,7 @@ export class GeminiService {
     batchId?: number | null
     mockJson: string
   }): Promise<string> {
+    const cfg = await this.resolveConfig()
     const apiKey = await getGeminiApiKey()
     if (!apiKey && !process.env.CHRONA_GEMINI_MOCK) {
       throw new Error('Missing Gemini API key (set CHRONA_GEMINI_API_KEY or store via keychain)')
@@ -305,7 +340,7 @@ export class GeminiService {
       return opts.mockJson
     }
 
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${this.cfg.model}:generateContent?key=${encodeURIComponent(
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${cfg.model}:generateContent?key=${encodeURIComponent(
       apiKey!
     )}`
 
@@ -317,12 +352,13 @@ export class GeminiService {
     }
 
     const { text } = await this.fetchWithRetry({
+      cfg,
       url,
       method: 'POST',
       body: JSON.stringify(requestBody),
       callGroupId: opts.callGroupId,
       batchId: opts.batchId ?? null,
-      model: this.cfg.model,
+      model: cfg.model,
       operation: opts.operation
     })
 
@@ -330,6 +366,7 @@ export class GeminiService {
   }
 
   private async fetchWithRetry(opts: {
+    cfg: GeminiConfig
     url: string
     method: string
     body: string
@@ -340,11 +377,11 @@ export class GeminiService {
   }): Promise<{ text: string; latencyMs: number; httpStatus: number }> {
     let lastErr: unknown = null
 
-    for (let attempt = 1; attempt <= this.cfg.maxAttempts; attempt++) {
+    for (let attempt = 1; attempt <= opts.cfg.maxAttempts; attempt++) {
       const started = Date.now()
       try {
         const controller = new AbortController()
-        const t = setTimeout(() => controller.abort(), this.cfg.requestTimeoutMs)
+        const t = setTimeout(() => controller.abort(), opts.cfg.requestTimeoutMs)
 
         const res = await fetch(opts.url, {
           method: opts.method,
@@ -358,8 +395,8 @@ export class GeminiService {
         const text = await res.text()
         const latencyMs = Date.now() - started
 
-        const requestBody = this.cfg.logBodies ? opts.body : null
-        const responseBody = this.cfg.logBodies ? text : null
+        const requestBody = opts.cfg.logBodies ? opts.body : null
+        const responseBody = opts.cfg.logBodies ? text : null
 
         await this.storage.insertLLMCall({
           batchId: opts.batchId,
@@ -395,7 +432,7 @@ export class GeminiService {
           message: e instanceof Error ? e.message : String(e)
         })
 
-        if (attempt < this.cfg.maxAttempts) {
+        if (attempt < opts.cfg.maxAttempts) {
           await sleep(500 * Math.pow(2, attempt - 1))
           continue
         }
@@ -406,9 +443,10 @@ export class GeminiService {
   }
 }
 
-function buildTranscriptionPrompt(opts: { screenshotIntervalSeconds: number }): string {
+function buildTranscriptionPrompt(opts: { screenshotIntervalSeconds: number; preamble?: string }): string {
   return [
     'Return valid JSON only.',
+    opts.preamble && opts.preamble.trim() ? `\nUser instructions:\n${opts.preamble.trim()}\n` : '',
     '',
     'You are given a video that is a compressed timeline of screenshots at 1 frame per second.',
     `Each second of video corresponds to ${opts.screenshotIntervalSeconds} seconds of real time.`,
@@ -439,9 +477,11 @@ function buildCardGenerationPrompt(opts: {
     title: string
     summary?: string | null
   }>
+  preamble?: string
 }): string {
   return [
     'Return valid JSON only.',
+    opts.preamble && opts.preamble.trim() ? `\nUser instructions:\n${opts.preamble.trim()}\n` : '',
     '',
     'You are generating timeline activity cards based on timestamped observations.',
     `Window: [${opts.windowStartTs}, ${opts.windowEndTs}] (unix seconds).`,

@@ -5,6 +5,7 @@ import type { StorageService } from '../storage/storage'
 import { GeminiService } from '../gemini/gemini'
 import { stripCodeFences } from '../gemini/cards'
 import type { ReviewRating } from '../storage/storage'
+import type { SettingsStore } from '../settings'
 
 type TimelineCardLite = {
   id: number
@@ -22,11 +23,13 @@ export class AskService {
   private readonly storage: StorageService
   private readonly log: Logger
   private readonly gemini: GeminiService
+  private readonly settings: SettingsStore
 
-  constructor(opts: { storage: StorageService; log: Logger }) {
+  constructor(opts: { storage: StorageService; log: Logger; settings: SettingsStore }) {
     this.storage = opts.storage
     this.log = opts.log
-    this.gemini = new GeminiService({ storage: opts.storage, log: opts.log })
+    this.settings = opts.settings
+    this.gemini = new GeminiService({ storage: opts.storage, log: opts.log, settings: opts.settings })
   }
 
   async run(req: AskRunRequest): Promise<AskRunResponse> {
@@ -87,7 +90,8 @@ export class AskService {
       cards: selectedCards,
       aggregates,
       reviewTotals,
-      observations: observationsForPrompt
+      observations: observationsForPrompt,
+      preamble: (await this.settings.getAll()).promptPreambleAsk
     })
 
     const rawText = await this.gemini.generateJsonOnly({
@@ -363,9 +367,11 @@ function buildAskPrompt(opts: {
   aggregates: any
   reviewTotals: any | null
   observations: Array<{ startTs: number; endTs: number; observation: string }>
+  preamble?: string
 }): string {
   return [
     'Return valid JSON only. Do not include Markdown code fences.',
+    opts.preamble && opts.preamble.trim() ? `\nUser instructions:\n${opts.preamble.trim()}\n` : '',
     '',
     'You are Chrona. You answer questions about how the user spent time based on evidence provided below.',
     'You must stay grounded in the evidence. If the evidence is insufficient, say so and suggest what scope to change.',
