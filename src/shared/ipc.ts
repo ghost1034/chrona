@@ -4,14 +4,27 @@ export type AppPingResponse = {
 }
 
 export type Settings = {
-  version: 4
+  version: 5
   captureIntervalSeconds: number
+  captureSelectedDisplayId: string | null
+  captureIncludeCursor: boolean
+
   storageLimitRecordingsBytes: number
   storageLimitTimelapsesBytes: number
   timelapsesEnabled: boolean
   timelapseFps: number
   autoStartEnabled: boolean
   timelinePxPerHour: number
+
+  geminiModel: string
+  geminiRequestTimeoutMs: number
+  geminiMaxAttempts: number
+  geminiLogBodies: boolean
+
+  promptPreambleTranscribe: string
+  promptPreambleCards: string
+  promptPreambleAsk: string
+  promptPreambleJournalDraft: string
 }
 
 export type CaptureState = {
@@ -245,7 +258,8 @@ export const IPC_EVENTS = {
   captureError: 'event:captureError',
   analysisBatchUpdated: 'event:analysisBatchUpdated',
   timelineUpdated: 'event:timelineUpdated',
-  storageUsageUpdated: 'event:storageUsageUpdated'
+  storageUsageUpdated: 'event:storageUsageUpdated',
+  navigate: 'event:navigate'
 } as const
 
 export type IpcChannel = IpcContractKey
