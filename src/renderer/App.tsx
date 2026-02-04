@@ -3,6 +3,7 @@ import type { TimelineCardDTO } from '../shared/timeline'
 import { dayKeyFromUnixSeconds, dayWindowForDayKey, formatClockAscii } from '../shared/time'
 import { formatBytes } from '../shared/format'
 import type { AskSourceRef } from '../shared/ask'
+import type { JournalDraftDTO, JournalEntryDTO, JournalEntryPatch } from '../shared/journal'
 import { DashboardView } from './DashboardView'
 
 type DisplayInfo = { id: string; bounds: { width: number; height: number }; scaleFactor: number }
@@ -49,7 +50,7 @@ export function App() {
   const [dayKey, setDayKey] = useState<string>(() => dayKeyFromUnixSeconds(Math.floor(Date.now() / 1000)))
   const [cards, setCards] = useState<TimelineCardDTO[]>([])
   const [selectedCardId, setSelectedCardId] = useState<number | null>(null)
-  const [view, setView] = useState<'timeline' | 'review' | 'ask' | 'dashboard'>('timeline')
+  const [view, setView] = useState<'timeline' | 'review' | 'ask' | 'dashboard' | 'journal'>('timeline')
   const [reviewCoverage, setReviewCoverage] = useState<Record<number, number>>({})
 
   const [timelinePxPerHour, setTimelinePxPerHour] = useState<number>(TIMELINE_ZOOM_DEFAULT_PX_PER_HOUR)
@@ -77,6 +78,38 @@ export function App() {
   const [askIncludeReview, setAskIncludeReview] = useState<boolean>(true)
   const askScrollRef = useRef<HTMLDivElement | null>(null)
   const pendingJumpRef = useRef<{ dayKey: string; cardId: number } | null>(null)
+
+  const dayKeyRef = useRef<string>(dayKey)
+  useEffect(() => {
+    dayKeyRef.current = dayKey
+  }, [dayKey])
+
+  const viewRef = useRef<typeof view>(view)
+  useEffect(() => {
+    viewRef.current = view
+  }, [view])
+
+  const [journalEntry, setJournalEntry] = useState<JournalEntryDTO | null>(null)
+  const [journalLoading, setJournalLoading] = useState<boolean>(false)
+  const [journalSaveLine, setJournalSaveLine] = useState<string>('')
+  const [journalForm, setJournalForm] = useState<{
+    intentions: string
+    notes: string
+    reflections: string
+    summary: string
+    status: 'draft' | 'complete'
+  }>({ intentions: '', notes: '', reflections: '', summary: '', status: 'draft' })
+  const pendingJournalPatchRef = useRef<JournalEntryPatch>({})
+  const journalSaveTimeoutRef = useRef<number | null>(null)
+
+  const [journalDraftLoading, setJournalDraftLoading] = useState<boolean>(false)
+  const [journalDraftError, setJournalDraftError] = useState<string | null>(null)
+  const [journalDraft, setJournalDraft] = useState<JournalDraftDTO | null>(null)
+  const [journalDraftIncludeObservations, setJournalDraftIncludeObservations] = useState<boolean>(true)
+  const [journalDraftIncludeReview, setJournalDraftIncludeReview] = useState<boolean>(true)
+  const [journalDraftApplyMode, setJournalDraftApplyMode] = useState<'fillEmpty' | 'append' | 'replace'>('fillEmpty')
+  const [journalExportStartDayKey, setJournalExportStartDayKey] = useState<string>(dayKey)
+  const [journalExportEndDayKey, setJournalExportEndDayKey] = useState<string>(dayKey)
 
   useEffect(() => {
     void (async () => {
@@ -151,6 +184,38 @@ export function App() {
   useEffect(() => {
     void refreshDay(dayKey, false)
   }, [dayKey])
+
+  useEffect(() => {
+    if (view !== 'journal') return
+    void (async () => {
+      const k = dayKey
+      if (journalSaveTimeoutRef.current !== null) {
+        window.clearTimeout(journalSaveTimeoutRef.current)
+        journalSaveTimeoutRef.current = null
+      }
+      pendingJournalPatchRef.current = {}
+      setJournalLoading(true)
+      setJournalDraft(null)
+      setJournalDraftError(null)
+      setJournalSaveLine('')
+      setJournalExportStartDayKey(k)
+      setJournalExportEndDayKey(k)
+      try {
+        const res = await window.chrona.getJournalDay(k)
+        if (dayKeyRef.current !== k || viewRef.current !== 'journal') return
+        setJournalEntry(res.entry)
+        setJournalForm({
+          intentions: res.entry?.intentions ?? '',
+          notes: res.entry?.notes ?? '',
+          reflections: res.entry?.reflections ?? '',
+          summary: res.entry?.summary ?? '',
+          status: res.entry?.status ?? 'draft'
+        })
+      } finally {
+        if (dayKeyRef.current === k && viewRef.current === 'journal') setJournalLoading(false)
+      }
+    })()
+  }, [view, dayKey])
 
   useEffect(() => {
     if (view !== 'ask') return
@@ -291,6 +356,124 @@ export function App() {
     await window.chrona.saveMarkdownRange(dayKey, dayKey)
   }
 
+  function scheduleJournalSave(dayKeyForSave: string, patch: JournalEntryPatch) {
+    pendingJournalPatchRef.current = { ...pendingJournalPatchRef.current, ...patch }
+    setJournalSaveLine('Saving…')
+
+    if (journalSaveTimeoutRef.current !== null) {
+      window.clearTimeout(journalSaveTimeoutRef.current)
+    }
+
+    journalSaveTimeoutRef.current = window.setTimeout(() => {
+      const k = dayKeyForSave
+      const toSend = pendingJournalPatchRef.current
+      pendingJournalPatchRef.current = {}
+
+      void (async () => {
+        try {
+          const res = await window.chrona.upsertJournalEntry(k, toSend)
+          if (dayKeyRef.current !== k) return
+          setJournalEntry(res.entry)
+          setJournalSaveLine(`Saved · ${new Date().toLocaleTimeString()}`)
+        } catch (e) {
+          if (dayKeyRef.current !== k) return
+          setJournalSaveLine(`Save failed: ${e instanceof Error ? e.message : String(e)}`)
+        }
+      })()
+    }, 800)
+  }
+
+  function updateJournalField<K extends keyof typeof journalForm>(key: K, value: (typeof journalForm)[K]) {
+    setJournalForm((prev) => ({ ...prev, [key]: value }))
+    const patch: JournalEntryPatch = { [key]: value } as any
+    scheduleJournalSave(dayKey, patch)
+  }
+
+  async function onJournalCopyDay() {
+    await window.chrona.copyJournalDayToClipboard(dayKey)
+  }
+
+  async function onJournalExportRange(start: string, end: string) {
+    await window.chrona.saveJournalMarkdownRange(start, end)
+  }
+
+  async function onJournalDelete() {
+    const ok = window.confirm('Delete this journal entry? This cannot be undone.')
+    if (!ok) return
+    await window.chrona.deleteJournalEntry(dayKey)
+    setJournalEntry(null)
+    setJournalForm({ intentions: '', notes: '', reflections: '', summary: '', status: 'draft' })
+    setJournalDraft(null)
+    setJournalDraftError(null)
+    setJournalSaveLine('Deleted')
+  }
+
+  async function onJournalDraftWithGemini() {
+    const k = dayKey
+    setJournalDraftLoading(true)
+    setJournalDraftError(null)
+    setJournalDraft(null)
+    try {
+      const res = await window.chrona.draftJournalWithGemini(k, {
+        includeObservations: journalDraftIncludeObservations,
+        includeReview: journalDraftIncludeReview
+      })
+      if (dayKeyRef.current !== k) return
+      setJournalDraft(res.draft)
+    } catch (e) {
+      setJournalDraftError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setJournalDraftLoading(false)
+    }
+  }
+
+  function applyJournalDraft(mode: 'fillEmpty' | 'append' | 'replace') {
+    if (!journalDraft) return
+
+    const next: JournalEntryPatch = {}
+    const applyField = (key: 'intentions' | 'notes' | 'reflections' | 'summary') => {
+      const draftText = (journalDraft as any)[key] as string
+      const current = (journalForm as any)[key] as string
+      const curTrim = String(current ?? '').trim()
+      const draftTrim = String(draftText ?? '').trim()
+      if (!draftTrim) return
+
+      if (mode === 'fillEmpty') {
+        if (curTrim) return
+        ;(next as any)[key] = draftTrim
+        return
+      }
+      if (mode === 'replace') {
+        ;(next as any)[key] = draftTrim
+        return
+      }
+      // append
+      if (!curTrim) {
+        ;(next as any)[key] = draftTrim
+        return
+      }
+      ;(next as any)[key] = `${current.replace(/\s*$/g, '')}\n\n${draftTrim}`
+    }
+
+    applyField('intentions')
+    applyField('notes')
+    applyField('reflections')
+    applyField('summary')
+
+    if (Object.keys(next).length === 0) return
+    setJournalForm((prev) => ({
+      ...prev,
+      intentions: Object.prototype.hasOwnProperty.call(next, 'intentions') ? (next.intentions as any) : prev.intentions,
+      notes: Object.prototype.hasOwnProperty.call(next, 'notes') ? (next.notes as any) : prev.notes,
+      reflections: Object.prototype.hasOwnProperty.call(next, 'reflections')
+        ? (next.reflections as any)
+        : prev.reflections,
+      summary: Object.prototype.hasOwnProperty.call(next, 'summary') ? (next.summary as any) : prev.summary
+    }))
+    scheduleJournalSave(dayKey, next)
+    setJournalSaveLine('Draft applied')
+  }
+
   async function onApplyRating(card: TimelineCardDTO, rating: 'focus' | 'neutral' | 'distracted') {
     await window.chrona.applyReviewRating(card.startTs, card.endTs, rating)
     await refreshReview(dayKey)
@@ -418,16 +601,18 @@ export function App() {
       <header className="header">
         <div className="brand">
           <div className="wordmark">Chrona</div>
-          <div className="tagline">
-            {view === 'ask'
-              ? 'Ask Chrona'
-              : view === 'review'
-                ? 'Review'
-                : view === 'dashboard'
-                  ? 'Dashboard'
-                  : `Timeline · ${dayKey}`}
-          </div>
-        </div>
+           <div className="tagline">
+             {view === 'ask'
+               ? 'Ask Chrona'
+               : view === 'review'
+                 ? 'Review'
+                 : view === 'dashboard'
+                   ? 'Dashboard'
+                    : view === 'journal'
+                      ? `Journal · ${dayKey}`
+                      : `Timeline · ${dayKey}`}
+           </div>
+         </div>
 
         <div className="toolbar">
           <button
@@ -450,6 +635,12 @@ export function App() {
             onClick={() => setView('dashboard')}
           >
             Dashboard
+          </button>
+          <button
+            className={`btn ${view === 'journal' ? 'btn-accent' : ''}`}
+            onClick={() => setView('journal')}
+          >
+            Journal
           </button>
           <button className="btn" disabled={view !== 'timeline'} onClick={() => zoomOut()}>
             Zoom -
@@ -481,11 +672,11 @@ export function App() {
             value={dayKey}
             onChange={(e) => setDayKey(e.target.value)}
           />
-          <button className="btn" onClick={() => void onCopyDay()}>
-            Copy
+          <button className="btn" onClick={() => void (view === 'journal' ? onJournalCopyDay() : onCopyDay())}>
+            {view === 'journal' ? 'Copy Journal' : 'Copy Timeline'}
           </button>
-          <button className="btn" onClick={() => void onExportDay()}>
-            Export
+          <button className="btn" onClick={() => void (view === 'journal' ? onJournalExportRange(dayKey, dayKey) : onExportDay())}>
+            {view === 'journal' ? 'Export Journal' : 'Export Timeline'}
           </button>
         </div>
       </header>
@@ -637,6 +828,74 @@ export function App() {
                   </button>
                 </div>
                 <div className="askHint mono">Tip: Cmd/Ctrl+Enter to send</div>
+              </div>
+            </div>
+          </section>
+        ) : view === 'journal' ? (
+          <section className="timeline">
+            <div className="timelineScroll">
+              <div className="journalWrap">
+                <div className="journalHeader">
+                  <div>
+                    <div className="sideTitle">Journal</div>
+                    <div className="sideMeta">
+                      Structured daily entry for {dayKey} (4 AM to 4 AM). {journalSaveLine ? journalSaveLine : ''}
+                    </div>
+                  </div>
+
+                  <div className="journalHeaderRight">
+                    <div className="pill">Status: {journalForm.status}</div>
+                    <button className="btn" disabled={journalLoading} onClick={() => void onJournalDelete()}>
+                      Delete
+                    </button>
+                  </div>
+                </div>
+
+                {journalLoading ? <div className="mono">Loading…</div> : null}
+
+                <div className="journalField">
+                  <div className="label">Intentions</div>
+                  <textarea
+                    className="input journalTextarea"
+                    rows={6}
+                    value={journalForm.intentions}
+                    onChange={(e) => updateJournalField('intentions', e.target.value)}
+                    placeholder="What do you want to accomplish?"
+                  />
+                </div>
+
+                <div className="journalField">
+                  <div className="label">Notes</div>
+                  <textarea
+                    className="input journalTextarea"
+                    rows={10}
+                    value={journalForm.notes}
+                    onChange={(e) => updateJournalField('notes', e.target.value)}
+                    placeholder="Key events, decisions, or context."
+                  />
+                </div>
+
+                <div className="journalField">
+                  <div className="label">Reflections</div>
+                  <textarea
+                    className="input journalTextarea"
+                    rows={10}
+                    value={journalForm.reflections}
+                    onChange={(e) => updateJournalField('reflections', e.target.value)}
+                    placeholder="What went well? What was hard? One improvement for next time."
+                  />
+                </div>
+
+                <div className="journalField">
+                  <div className="label">Summary</div>
+                  <textarea
+                    className="input journalTextarea"
+                    rows={8}
+                    value={journalForm.summary}
+                    onChange={(e) => updateJournalField('summary', e.target.value)}
+                    placeholder="Short recap of the day."
+                  />
+                </div>
               </div>
             </div>
           </section>
@@ -793,6 +1052,167 @@ export function App() {
                   </button>
                 </div>
               </div>
+            </div>
+          ) : view === 'journal' ? (
+            <div className="sidePanel">
+              <div className="sideTitle">Journal tools</div>
+              <div className="sideMeta">Draft with Gemini uses timeline text (and optionally observations).</div>
+
+              <div className="field">
+                <div className="label">Status</div>
+                <select
+                  className="input"
+                  value={journalForm.status}
+                  onChange={(e) => updateJournalField('status', e.target.value as any)}
+                >
+                  <option value="draft">Draft</option>
+                  <option value="complete">Complete</option>
+                </select>
+              </div>
+
+              <div className="block">
+                <div className="sideTitle">Gemini draft</div>
+                <div className="sideMeta">
+                  Key: {hasGeminiKey === null ? '...' : hasGeminiKey ? 'configured' : 'missing'}
+                </div>
+
+                <div className="row">
+                  <label className="pill">
+                    <input
+                      type="checkbox"
+                      checked={journalDraftIncludeObservations}
+                      onChange={(e) => setJournalDraftIncludeObservations(e.target.checked)}
+                    />
+                    Use observations
+                  </label>
+                </div>
+
+                <div className="row">
+                  <label className="pill">
+                    <input
+                      type="checkbox"
+                      checked={journalDraftIncludeReview}
+                      onChange={(e) => setJournalDraftIncludeReview(e.target.checked)}
+                    />
+                    Include review ratings
+                  </label>
+                </div>
+
+                <div className="field">
+                  <div className="label">Apply mode</div>
+                  <select
+                    className="input"
+                    value={journalDraftApplyMode}
+                    onChange={(e) => setJournalDraftApplyMode(e.target.value as any)}
+                  >
+                    <option value="fillEmpty">Fill empty fields</option>
+                    <option value="append">Append to existing</option>
+                    <option value="replace">Replace existing</option>
+                  </select>
+                </div>
+
+                <div className="row">
+                  <button
+                    className="btn btn-accent"
+                    disabled={journalDraftLoading}
+                    onClick={() => void onJournalDraftWithGemini()}
+                  >
+                    {journalDraftLoading ? 'Drafting…' : 'Draft with Gemini'}
+                  </button>
+                  <button
+                    className="btn"
+                    disabled={!journalDraft}
+                    onClick={() => applyJournalDraft(journalDraftApplyMode)}
+                  >
+                    Apply draft
+                  </button>
+                </div>
+
+                {journalDraftError ? <div className="mono error">Draft error: {journalDraftError}</div> : null}
+
+                {journalDraft ? (
+                  <div className="journalDraftPreview">
+                    <div className="label">Draft preview</div>
+                    <div className="journalDraftGrid">
+                      <div className="journalDraftCell">
+                        <div className="mono">Intentions</div>
+                        <div className="text">{journalDraft.intentions}</div>
+                      </div>
+                      <div className="journalDraftCell">
+                        <div className="mono">Notes</div>
+                        <div className="text">{journalDraft.notes}</div>
+                      </div>
+                      <div className="journalDraftCell">
+                        <div className="mono">Reflections</div>
+                        <div className="text">{journalDraft.reflections}</div>
+                      </div>
+                      <div className="journalDraftCell">
+                        <div className="mono">Summary</div>
+                        <div className="text">{journalDraft.summary}</div>
+                      </div>
+                    </div>
+                  </div>
+                ) : null}
+              </div>
+
+              <div className="block">
+                <div className="sideTitle">Export range</div>
+                <div className="row">
+                  <label className="label">
+                    Start
+                    <input
+                      className="input"
+                      type="date"
+                      value={journalExportStartDayKey}
+                      onChange={(e) => setJournalExportStartDayKey(e.target.value)}
+                    />
+                  </label>
+                </div>
+                <div className="row">
+                  <label className="label">
+                    End
+                    <input
+                      className="input"
+                      type="date"
+                      value={journalExportEndDayKey}
+                      onChange={(e) => setJournalExportEndDayKey(e.target.value)}
+                    />
+                  </label>
+                </div>
+                <div className="row">
+                  <button
+                    className="btn"
+                    onClick={() => void onJournalExportRange(journalExportStartDayKey, journalExportEndDayKey)}
+                  >
+                    Export
+                  </button>
+                  <button className="btn" onClick={() => void onJournalCopyDay()}>
+                    Copy day
+                  </button>
+                </div>
+              </div>
+
+              <div className="block">
+                <div className="sideTitle">Gemini key</div>
+                <div className="row">
+                  <input
+                    className="input"
+                    type="password"
+                    value={geminiKeyInput}
+                    placeholder="AIza..."
+                    onChange={(e) => setGeminiKeyInput(e.target.value)}
+                  />
+                  <button className="btn" onClick={() => void onSaveGeminiKey()}>
+                    Save
+                  </button>
+                </div>
+              </div>
+
+              {journalSaveLine ? (
+                <div className="row">
+                  <div className="mono">{journalSaveLine}</div>
+                </div>
+              ) : null}
             </div>
           ) : selectedCard ? (
             <div className="sidePanel">
