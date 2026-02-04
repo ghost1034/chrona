@@ -159,6 +159,11 @@ export type IpcContract = {
     req: { relPath: string }
     res: { fileUrl: string }
   }
+
+  'ask:run': {
+    req: import('./ask').AskRunRequest
+    res: import('./ask').AskRunResponse
+  }
 }
 
 export const IPC_CHANNELS = {
@@ -185,7 +190,8 @@ export const IPC_CHANNELS = {
   reviewApplyRating: 'review:applyRating',
   storageGetUsage: 'storage:getUsage',
   storagePurgeNow: 'storage:purgeNow',
-  storageResolveFileUrl: 'storage:resolveFileUrl'
+  storageResolveFileUrl: 'storage:resolveFileUrl',
+  askRun: 'ask:run'
 } as const
 
 export const IPC_EVENTS = {

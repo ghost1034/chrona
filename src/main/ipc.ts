@@ -15,6 +15,7 @@ import type { RetentionService } from './retention/retention'
 import { toChronaMediaUrl } from './mediaProtocol'
 import { applyAutoStart } from './autostart'
 import type { Logger } from './logger'
+import type { AskService } from './ask/ask'
 
 type Handler<K extends keyof IpcContract> = (
   req: IpcContract[K]['req']
@@ -26,6 +27,7 @@ export function registerIpc(opts: {
   storage: StorageService
   analysis: AnalysisService
   retention: RetentionService
+  ask: AskService
   log: Logger
 }) {
   handle('app:ping', async () => ({ ok: true, nowTs: Math.floor(Date.now() / 1000) }))
@@ -171,6 +173,10 @@ export function registerIpc(opts: {
     // Avoid returning file:// URLs to the renderer. Chromium blocks http(s) -> file:// loads
     // (common during dev when using Vite), which breaks <video> playback.
     return { fileUrl: toChronaMediaUrl(rel) }
+  })
+
+  handle('ask:run', async (req) => {
+    return opts.ask.run(req)
   })
 }
 
