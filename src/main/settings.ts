@@ -3,14 +3,27 @@ import path from 'node:path'
 import type { Settings } from '../shared/ipc'
 
 const DEFAULT_SETTINGS: Settings = {
-  version: 4,
+  version: 5,
   captureIntervalSeconds: 10,
+  captureSelectedDisplayId: null,
+  captureIncludeCursor: false,
+
   storageLimitRecordingsBytes: 10 * 1024 * 1024 * 1024,
   storageLimitTimelapsesBytes: 10 * 1024 * 1024 * 1024,
   timelapsesEnabled: true,
   timelapseFps: 2,
   autoStartEnabled: false,
-  timelinePxPerHour: 600
+  timelinePxPerHour: 600,
+
+  geminiModel: 'gemini-2.5-flash',
+  geminiRequestTimeoutMs: 60_000,
+  geminiMaxAttempts: 3,
+  geminiLogBodies: false,
+
+  promptPreambleTranscribe: '',
+  promptPreambleCards: '',
+  promptPreambleAsk: '',
+  promptPreambleJournalDraft: ''
 }
 
 export class SettingsStore {
@@ -32,11 +45,12 @@ export class SettingsStore {
         parsed?.version !== 1 &&
         parsed?.version !== 2 &&
         parsed?.version !== 3 &&
-        parsed?.version !== 4
+        parsed?.version !== 4 &&
+        parsed?.version !== 5
       )
         return DEFAULT_SETTINGS
 
-      return { ...DEFAULT_SETTINGS, ...parsed, version: 4 }
+      return { ...DEFAULT_SETTINGS, ...parsed, version: 5 }
     } catch {
       return DEFAULT_SETTINGS
     }
@@ -47,7 +61,7 @@ export class SettingsStore {
     const next: Settings = {
       ...current,
       ...patch,
-      version: 4
+      version: 5
     }
 
     await fs.mkdir(path.dirname(this.filePath), { recursive: true })
