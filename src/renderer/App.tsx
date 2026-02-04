@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { TimelineCardDTO } from '../shared/timeline'
 import { dayKeyFromUnixSeconds, dayWindowForDayKey, formatClockAscii } from '../shared/time'
 import { formatBytes } from '../shared/format'
+import type { AskSourceRef } from '../shared/ask'
 
 type DisplayInfo = { id: string; bounds: { width: number; height: number }; scaleFactor: number }
 
@@ -47,7 +48,7 @@ export function App() {
   const [dayKey, setDayKey] = useState<string>(() => dayKeyFromUnixSeconds(Math.floor(Date.now() / 1000)))
   const [cards, setCards] = useState<TimelineCardDTO[]>([])
   const [selectedCardId, setSelectedCardId] = useState<number | null>(null)
-  const [view, setView] = useState<'timeline' | 'review'>('timeline')
+  const [view, setView] = useState<'timeline' | 'review' | 'ask'>('timeline')
   const [reviewCoverage, setReviewCoverage] = useState<Record<number, number>>({})
 
   const [timelinePxPerHour, setTimelinePxPerHour] = useState<number>(TIMELINE_ZOOM_DEFAULT_PX_PER_HOUR)
@@ -60,6 +61,21 @@ export function App() {
   )
 
   const [selectedVideoUrl, setSelectedVideoUrl] = useState<string | null>(null)
+
+  const [askMessages, setAskMessages] = useState<
+    Array<{ id: string; role: 'user' | 'assistant'; content: string; sources?: AskSourceRef[] }>
+  >([])
+  const [askInput, setAskInput] = useState<string>('')
+  const [askLoading, setAskLoading] = useState<boolean>(false)
+  const [askError, setAskError] = useState<string | null>(null)
+  const [askFollowUps, setAskFollowUps] = useState<string[]>([])
+  const [askScopePreset, setAskScopePreset] = useState<'day' | 'today' | 'yesterday' | 'last7' | 'last30'>(
+    'day'
+  )
+  const [askUseObservations, setAskUseObservations] = useState<boolean>(true)
+  const [askIncludeReview, setAskIncludeReview] = useState<boolean>(true)
+  const askScrollRef = useRef<HTMLDivElement | null>(null)
+  const pendingJumpRef = useRef<{ dayKey: string; cardId: number } | null>(null)
 
   useEffect(() => {
     void (async () => {
@@ -136,6 +152,16 @@ export function App() {
   }, [dayKey])
 
   useEffect(() => {
+    if (view !== 'ask') return
+    // Keep chat scrolled to bottom on updates.
+    requestAnimationFrame(() => {
+      const el = askScrollRef.current
+      if (!el) return
+      el.scrollTop = el.scrollHeight
+    })
+  }, [askMessages, view, askLoading])
+
+  useEffect(() => {
     if (!didInitTimelineZoomRef.current) {
       didInitTimelineZoomRef.current = true
       return
@@ -174,10 +200,16 @@ export function App() {
     const nextCards = resolveOverlapsForDisplay(day.cards)
     setCards(nextCards)
 
-    setSelectedCardId((prev) => {
+    setSelectedCardId((_prev) => {
+      const pending = pendingJumpRef.current
+      if (pending && pending.dayKey === k) {
+        pendingJumpRef.current = null
+        return nextCards.some((c) => c.id === pending.cardId) ? pending.cardId : null
+      }
+
       if (!preserveSelection) return null
-      if (prev === null) return null
-      return nextCards.some((c) => c.id === prev) ? prev : null
+      if (_prev === null) return null
+      return nextCards.some((c) => c.id === _prev) ? _prev : null
     })
   }
 
@@ -385,7 +417,9 @@ export function App() {
       <header className="header">
         <div className="brand">
           <div className="wordmark">Chrona</div>
-          <div className="tagline">Timeline · {dayKey}</div>
+          <div className="tagline">
+            {view === 'ask' ? 'Ask Chrona' : view === 'review' ? 'Review' : `Timeline · ${dayKey}`}
+          </div>
         </div>
 
         <div className="toolbar">
@@ -400,6 +434,9 @@ export function App() {
             onClick={() => setView('review')}
           >
             Review
+          </button>
+          <button className={`btn ${view === 'ask' ? 'btn-accent' : ''}`} onClick={() => setView('ask')}>
+            Ask
           </button>
           <button className="btn" disabled={view !== 'timeline'} onClick={() => zoomOut()}>
             Zoom -
@@ -476,7 +513,7 @@ export function App() {
               </div>
             </div>
           </section>
-        ) : (
+        ) : view === 'review' ? (
           <section className="timeline">
             <div className="timelineScroll">
               <div className="reviewList">
@@ -484,10 +521,210 @@ export function App() {
               </div>
             </div>
           </section>
+        ) : (
+          <section className="timeline">
+            <div className="timelineScroll" ref={askScrollRef}>
+              <div className="askWrap">
+                {askMessages.length === 0 ? (
+                  <div className="askEmpty">
+                    <div className="sideTitle">Ask Chrona</div>
+                    <div className="sideMeta">Ask questions about your time in the selected scope.</div>
+                    <div className="askSuggestions">
+                      {[
+                        'What did I work on today?',
+                        'How much time was Work vs Distraction?',
+                        'What were my longest uninterrupted focus blocks?',
+                        'Summarize this day in 5 bullets.',
+                        'What did I do between 2 PM and 5 PM?',
+                        'What were my biggest context switches?'
+                      ].map((q) => (
+                        <button
+                          key={q}
+                          className="chip"
+                          disabled={askLoading}
+                          onClick={() => {
+                            setAskInput(q)
+                            void onRunAsk(q)
+                          }}
+                        >
+                          {q}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                ) : null}
+
+                <div className="askMessages">
+                  {askMessages.map((m) => (
+                    <div key={m.id} className={`askMsg ${m.role === 'user' ? 'user' : 'assistant'}`}>
+                      <div className="askMsgRole">{m.role === 'user' ? 'You' : 'Chrona'}</div>
+                      <div className="askMsgBody">{m.content}</div>
+                      {m.role === 'assistant' && m.sources && m.sources.length > 0 ? (
+                        <div className="askSources">
+                          <div className="askSourcesLabel">Sources</div>
+                          <div className="askSourcesChips">
+                            {m.sources.slice(0, 12).map((s) => (
+                              <button
+                                key={`${m.id}:${s.cardId}`}
+                                className="chip"
+                                onClick={() => jumpToCard(s)}
+                              >
+                                {formatClockAscii(s.startTs)}-{formatClockAscii(s.endTs)} · {s.title}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      ) : null}
+                    </div>
+                  ))}
+
+                  {askLoading ? (
+                    <div className="askMsg assistant">
+                      <div className="askMsgRole">Chrona</div>
+                      <div className="askMsgBody">Thinking…</div>
+                    </div>
+                  ) : null}
+
+                  {askError ? <div className="mono error">Ask error: {askError}</div> : null}
+
+                  {askFollowUps.length > 0 && !askLoading ? (
+                    <div className="askFollowUps">
+                      {askFollowUps.map((q) => (
+                        <button
+                          key={q}
+                          className="chip"
+                          onClick={() => {
+                            setAskInput(q)
+                            void onRunAsk(q)
+                          }}
+                        >
+                          {q}
+                        </button>
+                      ))}
+                    </div>
+                  ) : null}
+                </div>
+
+                <div className="askComposer">
+                  <textarea
+                    className="input askInput"
+                    rows={2}
+                    placeholder="Ask about your time…"
+                    value={askInput}
+                    onChange={(e) => setAskInput(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+                        e.preventDefault()
+                        void onRunAsk(askInput)
+                      }
+                    }}
+                  />
+                  <button className="btn btn-accent" disabled={askLoading} onClick={() => void onRunAsk(askInput)}>
+                    Ask
+                  </button>
+                </div>
+                <div className="askHint mono">Tip: Cmd/Ctrl+Enter to send</div>
+              </div>
+            </div>
+          </section>
         )}
 
         <aside className="side">
-          {selectedCard ? (
+          {view === 'ask' ? (
+            <div className="sidePanel">
+              <div className="sideTitle">Ask settings</div>
+              <div className="sideMeta">
+                Ask uses timeline text (and optionally observations) in the selected scope. Screenshots are not used
+                for Ask.
+              </div>
+
+              <div className="field">
+                <div className="label">Scope</div>
+                <select
+                  className="input"
+                  value={askScopePreset}
+                  disabled={askLoading}
+                  onChange={(e) => {
+                    const v = e.target.value as any
+                    setAskScopePreset(v)
+                    if (v === 'last30') setAskUseObservations(false)
+                  }}
+                >
+                  <option value="day">Selected day ({dayKey})</option>
+                  <option value="today">Today</option>
+                  <option value="yesterday">Yesterday</option>
+                  <option value="last7">Last 7 days</option>
+                  <option value="last30">Last 30 days</option>
+                </select>
+              </div>
+
+              <div className="row">
+                <label className="pill">
+                  <input
+                    type="checkbox"
+                    checked={askUseObservations}
+                    onChange={(e) => setAskUseObservations(e.target.checked)}
+                  />
+                  Use observations
+                </label>
+              </div>
+
+              <div className="row">
+                <label className="pill">
+                  <input
+                    type="checkbox"
+                    checked={askIncludeReview}
+                    onChange={(e) => setAskIncludeReview(e.target.checked)}
+                  />
+                  Include review ratings
+                </label>
+              </div>
+
+              <div className="row">
+                <button
+                  className="btn"
+                  disabled={askLoading || askMessages.length === 0}
+                  onClick={() => {
+                    setAskMessages([])
+                    setAskFollowUps([])
+                    setAskError(null)
+                    setAskInput('')
+                  }}
+                >
+                  Clear chat
+                </button>
+              </div>
+
+              <div className="block">
+                <div className="sideTitle">Gemini</div>
+                <div className="sideMeta">
+                  Key: {hasGeminiKey === null ? '...' : hasGeminiKey ? 'configured' : 'missing'}
+                </div>
+                <div className="row">
+                  <input
+                    className="input"
+                    type="password"
+                    value={geminiKeyInput}
+                    placeholder="AIza..."
+                    onChange={(e) => setGeminiKeyInput(e.target.value)}
+                  />
+                  <button className="btn" onClick={() => void onSaveGeminiKey()}>
+                    Save
+                  </button>
+                </div>
+              </div>
+
+              <div className="block">
+                <div className="sideTitle">Capture</div>
+                <div className="sideMeta">{statusLine}</div>
+                <div className="row">
+                  <button className="btn btn-accent" onClick={onToggleRecording}>
+                    {recording ? 'Stop recording' : 'Start recording'}
+                  </button>
+                </div>
+              </div>
+            </div>
+          ) : selectedCard ? (
             <div className="sidePanel">
               <div className="sideTitle">{selectedCard.title}</div>
               <div className="sideMeta">
@@ -727,6 +964,92 @@ export function App() {
       </main>
     </div>
   )
+
+  function getAskScope(): { startTs: number; endTs: number; label: string } {
+    const nowDayKey = dayKeyFromUnixSeconds(Math.floor(Date.now() / 1000))
+    if (askScopePreset === 'today') {
+      const w = dayWindowForDayKey(nowDayKey)
+      return { startTs: w.startTs, endTs: w.endTs, label: `Today (${nowDayKey})` }
+    }
+
+    if (askScopePreset === 'yesterday') {
+      const y = addDaysToDayKey(nowDayKey, -1)
+      const w = dayWindowForDayKey(y)
+      return { startTs: w.startTs, endTs: w.endTs, label: `Yesterday (${y})` }
+    }
+
+    if (askScopePreset === 'last7') {
+      const end = dayWindowForDayKey(nowDayKey).endTs
+      const startKey = addDaysToDayKey(nowDayKey, -6)
+      const start = dayWindowForDayKey(startKey).startTs
+      return { startTs: start, endTs: end, label: 'Last 7 days' }
+    }
+
+    if (askScopePreset === 'last30') {
+      const end = dayWindowForDayKey(nowDayKey).endTs
+      const startKey = addDaysToDayKey(nowDayKey, -29)
+      const start = dayWindowForDayKey(startKey).startTs
+      return { startTs: start, endTs: end, label: 'Last 30 days' }
+    }
+
+    const w = dayWindowForDayKey(dayKey)
+    return { startTs: w.startTs, endTs: w.endTs, label: `Day (${dayKey})` }
+  }
+
+  async function onRunAsk(text: string) {
+    const q = String(text ?? '').trim()
+    if (!q) return
+
+    const { startTs, endTs, label } = getAskScope()
+    setAskError(null)
+    setAskFollowUps([])
+
+    const userMsgId = `u:${Date.now()}:${Math.random().toString(16).slice(2)}`
+    setAskMessages((prev) => [...prev, { id: userMsgId, role: 'user', content: q }])
+    setAskInput('')
+    setAskLoading(true)
+
+    try {
+      const res = await window.chrona.askChrona({
+        question: q,
+        scope: { startTs, endTs },
+        options: {
+          useObservations: askUseObservations,
+          includeReview: askIncludeReview
+        }
+      })
+
+      const assistantMsgId = `a:${Date.now()}:${Math.random().toString(16).slice(2)}`
+      const scopeLine = `Scope: ${label}`
+      const content = `${res.answerMarkdown}\n\n${scopeLine}`
+      setAskMessages((prev) => [
+        ...prev,
+        {
+          id: assistantMsgId,
+          role: 'assistant',
+          content,
+          sources: res.sources
+        }
+      ])
+      setAskFollowUps(res.followUps ?? [])
+    } catch (e) {
+      setAskError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setAskLoading(false)
+    }
+  }
+
+  function jumpToCard(s: AskSourceRef) {
+    pendingJumpRef.current = { dayKey: s.dayKey, cardId: s.cardId }
+    setView('timeline')
+    setDayKey(s.dayKey)
+  }
+}
+
+function addDaysToDayKey(dayKey: string, deltaDays: number): string {
+  const base = new Date(dayKey + 'T00:00:00')
+  base.setDate(base.getDate() + deltaDays)
+  return dayKeyFromUnixSeconds(Math.floor(base.getTime() / 1000) + 4 * 60 * 60)
 }
 
 function formatCaptureStatus(state: {

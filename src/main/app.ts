@@ -14,6 +14,7 @@ import { TimelapseService } from './timelapse/timelapse'
 import { DeepLinkService, extractDeepLinksFromArgv } from './deeplink/deeplink'
 import { applyAutoStart } from './autostart'
 import { registerChronaMediaProtocol, registerChronaMediaScheme } from './mediaProtocol'
+import { AskService } from './ask/ask'
 
 let quitting = false
 let mainWindow: BrowserWindow | null = null
@@ -189,7 +190,9 @@ async function main() {
   })
   retention.start()
 
-  registerIpc({ settings, capture, storage, analysis, retention, log })
+  const ask = new AskService({ storage, log })
+
+  registerIpc({ settings, capture, storage, analysis, retention, ask, log })
 
   win.webContents.on('render-process-gone', (_event, details) => {
     log.error('renderer.gone', { reason: details.reason, exitCode: details.exitCode })
