@@ -5,6 +5,7 @@ export function createTray(opts: {
   getCaptureState: () => CaptureState
   onToggleRecording: (enabled: boolean) => void
   onOpenRecordingsFolder: () => void
+  onOpenSettings: () => void
   onOpen: () => void
   onQuit: () => void
 }): { tray: Tray; updateMenu: () => void } {
@@ -28,6 +29,7 @@ function buildTemplate(
   opts: {
     onToggleRecording: (enabled: boolean) => void
     onOpenRecordingsFolder: () => void
+    onOpenSettings: () => void
     onOpen: () => void
     onQuit: () => void
   }
@@ -52,6 +54,10 @@ function buildTemplate(
     {
       label: 'Open Chrona',
       click: () => opts.onOpen()
+    },
+    {
+      label: 'Settings…',
+      click: () => opts.onOpenSettings()
     },
     {
       label: 'Open Recordings Folder',
