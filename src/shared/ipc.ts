@@ -120,6 +120,37 @@ export type IpcContract = {
     res: { ok: true; filePath: string | null }
   }
 
+  'journal:getDay': {
+    req: { dayKey: string }
+    res: { dayKey: string; entry: import('./journal').JournalEntryDTO | null }
+  }
+  'journal:upsert': {
+    req: { dayKey: string; patch: import('./journal').JournalEntryPatch }
+    res: { entry: import('./journal').JournalEntryDTO }
+  }
+  'journal:delete': {
+    req: { dayKey: string }
+    res: { ok: true }
+  }
+  'journal:draftWithGemini': {
+    req: {
+      dayKey: string
+      options?: {
+        includeObservations?: boolean
+        includeReview?: boolean
+      }
+    }
+    res: { draft: import('./journal').JournalDraftDTO }
+  }
+  'journal:copyDayToClipboard': {
+    req: { dayKey: string }
+    res: { ok: true }
+  }
+  'journal:saveMarkdownRange': {
+    req: { startDayKey: string; endDayKey: string }
+    res: { ok: true; filePath: string | null }
+  }
+
   'review:getDay': {
     req: { dayKey: string }
     res: {
@@ -194,6 +225,12 @@ export const IPC_CHANNELS = {
   timelineUpdateCardCategory: 'timeline:updateCardCategory',
   timelineCopyDayToClipboard: 'timeline:copyDayToClipboard',
   timelineSaveMarkdownRange: 'timeline:saveMarkdownRange',
+  journalGetDay: 'journal:getDay',
+  journalUpsert: 'journal:upsert',
+  journalDelete: 'journal:delete',
+  journalDraftWithGemini: 'journal:draftWithGemini',
+  journalCopyDayToClipboard: 'journal:copyDayToClipboard',
+  journalSaveMarkdownRange: 'journal:saveMarkdownRange',
   reviewGetDay: 'review:getDay',
   reviewApplyRating: 'review:applyRating',
   storageGetUsage: 'storage:getUsage',

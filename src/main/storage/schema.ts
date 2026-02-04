@@ -1,6 +1,6 @@
 import type Database from 'better-sqlite3'
 
-export const SCHEMA_VERSION = 1
+export const SCHEMA_VERSION = 2
 
 export function migrate(db: Database.Database) {
   const row = db.pragma('user_version', { simple: true }) as number
@@ -9,9 +9,21 @@ export function migrate(db: Database.Database) {
   if (currentVersion === 0) {
     db.transaction(() => {
       applyV1(db)
+      applyV2(db)
       db.pragma(`user_version = ${SCHEMA_VERSION}`)
     })()
-  } else if (currentVersion > SCHEMA_VERSION) {
+    return
+  }
+
+  if (currentVersion === 1) {
+    db.transaction(() => {
+      applyV2(db)
+      db.pragma(`user_version = ${SCHEMA_VERSION}`)
+    })()
+    return
+  }
+
+  if (currentVersion > SCHEMA_VERSION) {
     throw new Error(
       `DB schema version ${currentVersion} is newer than app supports (${SCHEMA_VERSION})`
     )
@@ -119,5 +131,23 @@ function applyV1(db: Database.Database) {
     CREATE INDEX IF NOT EXISTS idx_llm_calls_created ON llm_calls(created_at DESC);
     CREATE INDEX IF NOT EXISTS idx_llm_calls_group ON llm_calls(call_group_id, attempt);
     CREATE INDEX IF NOT EXISTS idx_llm_calls_batch ON llm_calls(batch_id);
+  `)
+}
+
+function applyV2(db: Database.Database) {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS journal_entries (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      day TEXT NOT NULL UNIQUE,
+      intentions TEXT,
+      notes TEXT,
+      reflections TEXT,
+      summary TEXT,
+      status TEXT NOT NULL DEFAULT 'draft' CHECK(status IN ('draft','complete')),
+      created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE INDEX IF NOT EXISTS idx_journal_entries_day ON journal_entries(day);
+    CREATE INDEX IF NOT EXISTS idx_journal_entries_status ON journal_entries(status);
   `)
 }
