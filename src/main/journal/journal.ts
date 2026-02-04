@@ -4,16 +4,19 @@ import type { Logger } from '../logger'
 import { GeminiService } from '../gemini/gemini'
 import type { StorageService } from '../storage/storage'
 import type { ReviewRating } from '../storage/storage'
+import type { SettingsStore } from '../settings'
 
 export class JournalService {
   private readonly storage: StorageService
   private readonly log: Logger
   private readonly gemini: GeminiService
+  private readonly settings: SettingsStore
 
-  constructor(opts: { storage: StorageService; log: Logger }) {
+  constructor(opts: { storage: StorageService; log: Logger; settings: SettingsStore }) {
     this.storage = opts.storage
     this.log = opts.log
-    this.gemini = new GeminiService({ storage: opts.storage, log: opts.log })
+    this.settings = opts.settings
+    this.gemini = new GeminiService({ storage: opts.storage, log: opts.log, settings: opts.settings })
   }
 
   async draftWithGemini(opts: {
@@ -79,6 +82,7 @@ export class JournalService {
       : []
 
     const callGroupId = `journal:${dayKey}:${Date.now()}`
+    const settings = await this.settings.getAll()
     const prompt = buildDraftPrompt({
       dayKey,
       windowStartTs: win.startTs,
@@ -86,7 +90,8 @@ export class JournalService {
       cards,
       aggregates,
       reviewTotals,
-      observations: observationsForPrompt
+      observations: observationsForPrompt,
+      preamble: settings.promptPreambleJournalDraft
     })
 
     const rawText = await this.gemini.generateJsonOnly({
@@ -154,9 +159,11 @@ function buildDraftPrompt(opts: {
   aggregates: any
   reviewTotals: any | null
   observations: Array<{ startTs: number; endTs: number; observation: string }>
+  preamble?: string
 }): string {
   return [
     'Return valid JSON only. Do not include Markdown code fences.',
+    opts.preamble && opts.preamble.trim() ? `\nUser instructions:\n${opts.preamble.trim()}\n` : '',
     '',
     'You are writing a structured daily journal entry for the user.',
     'Stay grounded in the evidence provided. Do not invent meetings, people, or outcomes.',
