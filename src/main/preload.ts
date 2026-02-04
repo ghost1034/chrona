@@ -47,6 +47,8 @@ contextBridge.exposeInMainWorld('chrona', {
   purgeStorageNow: () => invoke('storage:purgeNow', undefined),
   resolveFileUrl: (relPath: string) => invoke('storage:resolveFileUrl', { relPath }),
 
+  askChrona: (req: IpcContract['ask:run']['req']) => invoke('ask:run', req),
+
   onRecordingStateChanged: (cb: (state: IpcContract['capture:getState']['res']) => void) => {
     const listener = (_event: unknown, payload: IpcContract['capture:getState']['res']) => cb(payload)
     ipcRenderer.on(IPC_EVENTS.recordingStateChanged, listener)
@@ -136,6 +138,8 @@ export type ChronaApi = {
   getStorageUsage: () => InvokeResult<'storage:getUsage'>
   purgeStorageNow: () => InvokeResult<'storage:purgeNow'>
   resolveFileUrl: (relPath: string) => InvokeResult<'storage:resolveFileUrl'>
+
+  askChrona: (req: IpcContract['ask:run']['req']) => InvokeResult<'ask:run'>
 
   onRecordingStateChanged: (
     cb: (state: IpcContract['capture:getState']['res']) => void

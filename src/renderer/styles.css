@@ -136,6 +136,117 @@ textarea {
   padding: 10px;
 }
 
+.askWrap {
+  padding: 14px;
+  display: grid;
+  gap: 12px;
+  min-height: 100%;
+  box-sizing: border-box;
+}
+
+.askEmpty {
+  padding: 6px 2px 10px;
+}
+
+.askSuggestions {
+  margin-top: 10px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.askMessages {
+  display: grid;
+  gap: 12px;
+}
+
+.askMsg {
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 14px;
+  padding: 12px;
+  background: rgba(0, 0, 0, 0.18);
+}
+
+.askMsg.user {
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.askMsgRole {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.askMsgBody {
+  margin-top: 8px;
+  font-size: 13px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+}
+
+.askSources {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.askSourcesLabel {
+  font-size: 12px;
+  color: var(--muted);
+  margin-bottom: 8px;
+}
+
+.askSourcesChips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.askFollowUps {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding-top: 6px;
+}
+
+.askComposer {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 10px;
+  align-items: end;
+  padding-top: 10px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.input.askInput {
+  width: 100%;
+  min-height: 44px;
+  resize: vertical;
+}
+
+.askHint {
+  padding-bottom: 2px;
+}
+
+.chip {
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(0, 0, 0, 0.16);
+  color: var(--text);
+  padding: 8px 10px;
+  border-radius: 999px;
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.chip:hover {
+  border-color: rgba(255, 255, 255, 0.22);
+  background: rgba(0, 0, 0, 0.22);
+}
+
+.chip:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
 .tick {
   position: absolute;
   left: 0;
@@ -416,6 +527,10 @@ textarea {
   }
   .reviewRowActions {
     flex-wrap: wrap;
+  }
+
+  .askComposer {
+    grid-template-columns: 1fr;
   }
   .input {
     width: 100%;
