@@ -39,6 +39,18 @@ contextBridge.exposeInMainWorld('chrona', {
   saveMarkdownRange: (startDayKey: string, endDayKey: string) =>
     invoke('timeline:saveMarkdownRange', { startDayKey, endDayKey }),
 
+  getJournalDay: (dayKey: string) => invoke('journal:getDay', { dayKey }),
+  upsertJournalEntry: (dayKey: string, patch: IpcContract['journal:upsert']['req']['patch']) =>
+    invoke('journal:upsert', { dayKey, patch }),
+  deleteJournalEntry: (dayKey: string) => invoke('journal:delete', { dayKey }),
+  draftJournalWithGemini: (
+    dayKey: string,
+    options?: { includeObservations?: boolean; includeReview?: boolean }
+  ) => invoke('journal:draftWithGemini', { dayKey, options }),
+  copyJournalDayToClipboard: (dayKey: string) => invoke('journal:copyDayToClipboard', { dayKey }),
+  saveJournalMarkdownRange: (startDayKey: string, endDayKey: string) =>
+    invoke('journal:saveMarkdownRange', { startDayKey, endDayKey }),
+
   getReviewDay: (dayKey: string) => invoke('review:getDay', { dayKey }),
   applyReviewRating: (startTs: number, endTs: number, rating: 'focus' | 'neutral' | 'distracted') =>
     invoke('review:applyRating', { startTs, endTs, rating }),
@@ -133,6 +145,19 @@ export type ChronaApi = {
   }) => InvokeResult<'timeline:updateCardCategory'>
   copyDayToClipboard: (dayKey: string) => InvokeResult<'timeline:copyDayToClipboard'>
   saveMarkdownRange: (startDayKey: string, endDayKey: string) => InvokeResult<'timeline:saveMarkdownRange'>
+
+  getJournalDay: (dayKey: string) => InvokeResult<'journal:getDay'>
+  upsertJournalEntry: (
+    dayKey: string,
+    patch: IpcContract['journal:upsert']['req']['patch']
+  ) => InvokeResult<'journal:upsert'>
+  deleteJournalEntry: (dayKey: string) => InvokeResult<'journal:delete'>
+  draftJournalWithGemini: (
+    dayKey: string,
+    options?: { includeObservations?: boolean; includeReview?: boolean }
+  ) => InvokeResult<'journal:draftWithGemini'>
+  copyJournalDayToClipboard: (dayKey: string) => InvokeResult<'journal:copyDayToClipboard'>
+  saveJournalMarkdownRange: (startDayKey: string, endDayKey: string) => InvokeResult<'journal:saveMarkdownRange'>
 
   getReviewDay: (dayKey: string) => InvokeResult<'review:getDay'>
   applyReviewRating: (startTs: number, endTs: number, rating: 'focus' | 'neutral' | 'distracted') =>
