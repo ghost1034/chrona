@@ -15,6 +15,7 @@ import { DeepLinkService, extractDeepLinksFromArgv } from './deeplink/deeplink'
 import { applyAutoStart } from './autostart'
 import { registerChronaMediaProtocol, registerChronaMediaScheme } from './mediaProtocol'
 import { AskService } from './ask/ask'
+import { DashboardService } from './dashboard/dashboard'
 
 let quitting = false
 let mainWindow: BrowserWindow | null = null
@@ -191,8 +192,9 @@ async function main() {
   retention.start()
 
   const ask = new AskService({ storage, log })
+  const dashboard = new DashboardService({ storage })
 
-  registerIpc({ settings, capture, storage, analysis, retention, ask, log })
+  registerIpc({ settings, capture, storage, analysis, retention, ask, dashboard, log })
 
   win.webContents.on('render-process-gone', (_event, details) => {
     log.error('renderer.gone', { reason: details.reason, exitCode: details.exitCode })
