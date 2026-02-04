@@ -97,6 +97,219 @@ textarea {
   padding: 14px;
 }
 
+.dashboardWrap {
+  padding: 14px;
+  display: grid;
+  gap: 12px;
+  box-sizing: border-box;
+}
+
+.dashboardHeader {
+  padding: 6px 2px 10px;
+}
+
+.dashboardTitle {
+  font-size: 18px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+.dashboardMeta {
+  margin-top: 6px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.dashboardControls {
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 14px;
+  padding: 12px;
+  background: rgba(0, 0, 0, 0.14);
+}
+
+.kpiGrid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.kpi {
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 14px;
+  padding: 12px;
+  background: rgba(0, 0, 0, 0.14);
+}
+
+.kpiLabel {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.kpiValue {
+  margin-top: 8px;
+  font-size: 18px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+.dashboardGrid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 12px;
+}
+
+.panel {
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 14px;
+  padding: 12px;
+  background: rgba(0, 0, 0, 0.14);
+}
+
+.panelTitle {
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+
+.categoryList {
+  margin-top: 10px;
+  display: grid;
+  gap: 10px;
+}
+
+.categoryRow {
+  display: grid;
+  grid-template-columns: 170px 1fr 110px;
+  gap: 10px;
+  align-items: center;
+}
+
+.categoryLeft {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.12);
+  flex: 0 0 auto;
+}
+
+.categoryName {
+  font-size: 13px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.categoryBar {
+  height: 10px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.06);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08);
+  overflow: hidden;
+}
+
+.categoryBarFill {
+  height: 100%;
+  border-radius: 999px;
+}
+
+.categoryRight {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.dayBars {
+  margin-top: 10px;
+}
+
+.dayBarsWrap {
+  display: grid;
+  gap: 8px;
+}
+
+.dayBarRow {
+  display: grid;
+  grid-template-columns: 100px 1fr 90px;
+  gap: 10px;
+  align-items: center;
+  padding: 10px;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.10);
+  background: rgba(0, 0, 0, 0.10);
+  cursor: pointer;
+  color: inherit;
+  text-align: left;
+}
+
+.dayBarRow:hover {
+  border-color: rgba(255, 255, 255, 0.18);
+  background: rgba(0, 0, 0, 0.18);
+}
+
+.dayBarTrack {
+  height: 12px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.06);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08);
+  overflow: hidden;
+}
+
+.dayBarFill {
+  height: 100%;
+  display: flex;
+}
+
+.dayBarSeg {
+  height: 100%;
+}
+
+.reviewStats {
+  margin-top: 10px;
+  display: grid;
+  gap: 10px;
+}
+
+.reviewPills {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.topList {
+  margin-top: 10px;
+  display: grid;
+  gap: 10px;
+}
+
+.topRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.topTitle {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.topTitle span:last-child {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.dashboardEmpty {
+  padding: 10px;
+}
+
 .reviewWrap {
   display: grid;
   gap: 12px;
@@ -534,5 +747,17 @@ textarea {
   }
   .input {
     width: 100%;
+  }
+
+  .kpiGrid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .categoryRow {
+    grid-template-columns: 1fr;
+  }
+
+  .dayBarRow {
+    grid-template-columns: 1fr;
   }
 }
