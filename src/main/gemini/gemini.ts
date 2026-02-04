@@ -289,12 +289,52 @@ export class GeminiService {
     }
   }
 
+  async generateJsonOnly(opts: {
+    operation: string
+    callGroupId: string
+    prompt: string
+    batchId?: number | null
+    mockJson: string
+  }): Promise<string> {
+    const apiKey = await getGeminiApiKey()
+    if (!apiKey && !process.env.CHRONA_GEMINI_MOCK) {
+      throw new Error('Missing Gemini API key (set CHRONA_GEMINI_API_KEY or store via keychain)')
+    }
+
+    if (process.env.CHRONA_GEMINI_MOCK) {
+      return opts.mockJson
+    }
+
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${this.cfg.model}:generateContent?key=${encodeURIComponent(
+      apiKey!
+    )}`
+
+    const requestBody = {
+      contents: [{ role: 'user', parts: [{ text: opts.prompt }] }],
+      generationConfig: {
+        temperature: 0.2
+      }
+    }
+
+    const { text } = await this.fetchWithRetry({
+      url,
+      method: 'POST',
+      body: JSON.stringify(requestBody),
+      callGroupId: opts.callGroupId,
+      batchId: opts.batchId ?? null,
+      model: this.cfg.model,
+      operation: opts.operation
+    })
+
+    return stripCodeFences(extractGeminiText(text))
+  }
+
   private async fetchWithRetry(opts: {
     url: string
     method: string
     body: string
     callGroupId: string
-    batchId: number
+    batchId: number | null
     model: string
     operation: string
   }): Promise<{ text: string; latencyMs: number; httpStatus: number }> {
