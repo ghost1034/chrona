@@ -16,6 +16,7 @@ import { toChronaMediaUrl } from './mediaProtocol'
 import { applyAutoStart } from './autostart'
 import type { Logger } from './logger'
 import type { AskService } from './ask/ask'
+import type { DashboardService } from './dashboard/dashboard'
 
 type Handler<K extends keyof IpcContract> = (
   req: IpcContract[K]['req']
@@ -28,6 +29,7 @@ export function registerIpc(opts: {
   analysis: AnalysisService
   retention: RetentionService
   ask: AskService
+  dashboard: DashboardService
   log: Logger
 }) {
   handle('app:ping', async () => ({ ok: true, nowTs: Math.floor(Date.now() / 1000) }))
@@ -177,6 +179,20 @@ export function registerIpc(opts: {
 
   handle('ask:run', async (req) => {
     return opts.ask.run(req)
+  })
+
+  handle('dashboard:get', async (req) => {
+    const startTs = Math.floor(Number(req.scope?.startTs))
+    const endTs = Math.floor(Number(req.scope?.endTs))
+    if (!Number.isFinite(startTs) || !Number.isFinite(endTs) || endTs <= startTs) {
+      throw new Error('Invalid dashboard scope')
+    }
+
+    return opts.dashboard.getStats({
+      scopeStartTs: startTs,
+      scopeEndTs: endTs,
+      includeSystem: !!req.options?.includeSystem
+    })
   })
 }
 

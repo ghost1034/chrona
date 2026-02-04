@@ -3,6 +3,7 @@ import type { TimelineCardDTO } from '../shared/timeline'
 import { dayKeyFromUnixSeconds, dayWindowForDayKey, formatClockAscii } from '../shared/time'
 import { formatBytes } from '../shared/format'
 import type { AskSourceRef } from '../shared/ask'
+import { DashboardView } from './DashboardView'
 
 type DisplayInfo = { id: string; bounds: { width: number; height: number }; scaleFactor: number }
 
@@ -48,7 +49,7 @@ export function App() {
   const [dayKey, setDayKey] = useState<string>(() => dayKeyFromUnixSeconds(Math.floor(Date.now() / 1000)))
   const [cards, setCards] = useState<TimelineCardDTO[]>([])
   const [selectedCardId, setSelectedCardId] = useState<number | null>(null)
-  const [view, setView] = useState<'timeline' | 'review' | 'ask'>('timeline')
+  const [view, setView] = useState<'timeline' | 'review' | 'ask' | 'dashboard'>('timeline')
   const [reviewCoverage, setReviewCoverage] = useState<Record<number, number>>({})
 
   const [timelinePxPerHour, setTimelinePxPerHour] = useState<number>(TIMELINE_ZOOM_DEFAULT_PX_PER_HOUR)
@@ -418,7 +419,13 @@ export function App() {
         <div className="brand">
           <div className="wordmark">Chrona</div>
           <div className="tagline">
-            {view === 'ask' ? 'Ask Chrona' : view === 'review' ? 'Review' : `Timeline · ${dayKey}`}
+            {view === 'ask'
+              ? 'Ask Chrona'
+              : view === 'review'
+                ? 'Review'
+                : view === 'dashboard'
+                  ? 'Dashboard'
+                  : `Timeline · ${dayKey}`}
           </div>
         </div>
 
@@ -437,6 +444,12 @@ export function App() {
           </button>
           <button className={`btn ${view === 'ask' ? 'btn-accent' : ''}`} onClick={() => setView('ask')}>
             Ask
+          </button>
+          <button
+            className={`btn ${view === 'dashboard' ? 'btn-accent' : ''}`}
+            onClick={() => setView('dashboard')}
+          >
+            Dashboard
           </button>
           <button className="btn" disabled={view !== 'timeline'} onClick={() => zoomOut()}>
             Zoom -
@@ -521,7 +534,7 @@ export function App() {
               </div>
             </div>
           </section>
-        ) : (
+        ) : view === 'ask' ? (
           <section className="timeline">
             <div className="timelineScroll" ref={askScrollRef}>
               <div className="askWrap">
@@ -627,6 +640,19 @@ export function App() {
               </div>
             </div>
           </section>
+        ) : (
+          <section className="timeline">
+            <div className="timelineScroll">
+              <DashboardView
+                selectedDayKey={dayKey}
+                onJumpToDay={(k) => {
+                  setDayKey(k)
+                  setSelectedCardId(null)
+                  setView('timeline')
+                }}
+              />
+            </div>
+          </section>
         )}
 
         <aside className="side">
@@ -720,6 +746,50 @@ export function App() {
                 <div className="row">
                   <button className="btn btn-accent" onClick={onToggleRecording}>
                     {recording ? 'Stop recording' : 'Start recording'}
+                  </button>
+                </div>
+              </div>
+            </div>
+          ) : view === 'dashboard' ? (
+            <div className="sidePanel">
+              <div className="sideTitle">Dashboard</div>
+              <div className="sideMeta">Activity stats and trends for a selectable range.</div>
+
+              <div className="block">
+                <div className="sideTitle">Capture</div>
+                <div className="sideMeta">{statusLine}</div>
+                <div className="row">
+                  <button className="btn btn-accent" onClick={onToggleRecording}>
+                    {recording ? 'Stop recording' : 'Start recording'}
+                  </button>
+                </div>
+                {systemPaused ? (
+                  <div className="row">
+                    <div className="pill">System paused (sleep/lock)</div>
+                  </div>
+                ) : null}
+                {lastError ? (
+                  <div className="row">
+                    <div className="mono error">Last capture error: {lastError}</div>
+                  </div>
+                ) : null}
+              </div>
+
+              <div className="block">
+                <div className="sideTitle">Gemini</div>
+                <div className="sideMeta">
+                  Key: {hasGeminiKey === null ? '...' : hasGeminiKey ? 'configured' : 'missing'}
+                </div>
+                <div className="row">
+                  <input
+                    className="input"
+                    type="password"
+                    value={geminiKeyInput}
+                    placeholder="AIza..."
+                    onChange={(e) => setGeminiKeyInput(e.target.value)}
+                  />
+                  <button className="btn" onClick={() => void onSaveGeminiKey()}>
+                    Save
                   </button>
                 </div>
               </div>
