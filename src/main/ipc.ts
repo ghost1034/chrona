@@ -7,7 +7,12 @@ import { app, shell } from 'electron'
 import type { AnalysisService } from './analysis/analysis'
 import { getGeminiApiKey, setGeminiApiKey } from './gemini/keychain'
 import { clipboard, dialog } from 'electron'
-import { formatDayForClipboard, formatRangeMarkdown } from '../shared/export'
+import {
+  formatDayForClipboard,
+  formatJournalDayForClipboard,
+  formatJournalRangeMarkdown,
+  formatRangeMarkdown
+} from '../shared/export'
 import { dayKeyFromUnixSeconds } from '../shared/time'
 import { dayWindowForDayKey } from '../shared/time'
 import { coverageByCardId } from '../shared/review'
@@ -17,6 +22,7 @@ import { applyAutoStart } from './autostart'
 import type { Logger } from './logger'
 import type { AskService } from './ask/ask'
 import type { DashboardService } from './dashboard/dashboard'
+import type { JournalService } from './journal/journal'
 
 type Handler<K extends keyof IpcContract> = (
   req: IpcContract[K]['req']
@@ -30,6 +36,7 @@ export function registerIpc(opts: {
   retention: RetentionService
   ask: AskService
   dashboard: DashboardService
+  journal: JournalService
   log: Logger
 }) {
   handle('app:ping', async () => ({ ok: true, nowTs: Math.floor(Date.now() / 1000) }))
@@ -116,6 +123,55 @@ export function registerIpc(opts: {
     const defaultName = `chrona-${req.startDayKey}_to_${req.endDayKey}.md`
     const res = await dialog.showSaveDialog({
       title: 'Export timeline as Markdown',
+      defaultPath: defaultName,
+      filters: [{ name: 'Markdown', extensions: ['md'] }]
+    })
+    if (res.canceled || !res.filePath) return { ok: true, filePath: null }
+    await import('node:fs/promises').then((fs) => fs.writeFile(res.filePath!, markdown, 'utf8'))
+    return { ok: true, filePath: res.filePath }
+  })
+
+  handle('journal:getDay', async (req) => {
+    const entry = await opts.storage.getJournalEntry(req.dayKey)
+    return { dayKey: req.dayKey, entry }
+  })
+
+  handle('journal:upsert', async (req) => {
+    const entry = await opts.storage.upsertJournalEntry({ dayKey: req.dayKey, patch: req.patch ?? {} })
+    return { entry }
+  })
+
+  handle('journal:delete', async (req) => {
+    await opts.storage.deleteJournalEntry(req.dayKey)
+    return { ok: true }
+  })
+
+  handle('journal:draftWithGemini', async (req) => {
+    const draft = await opts.journal.draftWithGemini({ dayKey: req.dayKey, options: req.options })
+    return { draft }
+  })
+
+  handle('journal:copyDayToClipboard', async (req) => {
+    const entry = await opts.storage.getJournalEntry(req.dayKey)
+    const text = formatJournalDayForClipboard({ dayKey: req.dayKey, entry })
+    clipboard.writeText(text)
+    return { ok: true }
+  })
+
+  handle('journal:saveMarkdownRange', async (req) => {
+    const entries = await opts.storage.listJournalEntriesInRange({
+      startDayKey: req.startDayKey,
+      endDayKey: req.endDayKey
+    })
+    const markdown = formatJournalRangeMarkdown({
+      startDayKey: req.startDayKey,
+      endDayKey: req.endDayKey,
+      entries
+    })
+
+    const defaultName = `chrona-journal-${req.startDayKey}_to_${req.endDayKey}.md`
+    const res = await dialog.showSaveDialog({
+      title: 'Export journal as Markdown',
       defaultPath: defaultName,
       filters: [{ name: 'Markdown', extensions: ['md'] }]
     })

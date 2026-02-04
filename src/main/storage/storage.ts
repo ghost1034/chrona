@@ -3,6 +3,7 @@ import path from 'node:path'
 import Database from 'better-sqlite3'
 import { migrate } from './schema'
 import { dayKeyFromUnixSeconds, formatClockAscii } from '../../shared/time'
+import type { JournalEntryDTO, JournalEntryPatch, JournalEntryStatus } from '../../shared/journal'
 
 export type ScreenshotRow = {
   id: number
@@ -60,6 +61,18 @@ export type TimelineCardInsert = {
 }
 
 export type ReviewRating = 'focus' | 'neutral' | 'distracted'
+
+export type JournalEntryRow = {
+  id: number
+  dayKey: string
+  intentions: string | null
+  notes: string | null
+  reflections: string | null
+  summary: string | null
+  status: JournalEntryStatus
+  createdAt: string
+  updatedAt: string
+}
 
 export class StorageService {
   private readonly userDataPath: string
@@ -568,6 +581,116 @@ export class StorageService {
     })
   }
 
+  async getJournalEntry(dayKey: string): Promise<JournalEntryDTO | null> {
+    const k = String(dayKey ?? '').trim()
+    if (!k) return null
+    return this.enqueue(() => {
+      const db = this.mustDb()
+      const r = db
+        .prepare(
+          `SELECT day, intentions, notes, reflections, summary, status, created_at, updated_at
+           FROM journal_entries
+           WHERE day = ?`
+        )
+        .get(k) as any
+      if (!r) return null
+      return mapJournalEntryRow(r)
+    })
+  }
+
+  async upsertJournalEntry(opts: {
+    dayKey: string
+    patch: JournalEntryPatch
+  }): Promise<JournalEntryDTO> {
+    const k = String(opts.dayKey ?? '').trim()
+    if (!k) throw new Error('dayKey is required')
+
+    const patch = opts.patch ?? {}
+    const prev = await this.getJournalEntry(k)
+
+    const next: JournalEntryDTO = {
+      dayKey: k,
+      intentions: Object.prototype.hasOwnProperty.call(patch, 'intentions')
+        ? normalizeNullableText((patch as any).intentions)
+        : prev?.intentions ?? null,
+      notes: Object.prototype.hasOwnProperty.call(patch, 'notes')
+        ? normalizeNullableText((patch as any).notes)
+        : prev?.notes ?? null,
+      reflections: Object.prototype.hasOwnProperty.call(patch, 'reflections')
+        ? normalizeNullableText((patch as any).reflections)
+        : prev?.reflections ?? null,
+      summary: Object.prototype.hasOwnProperty.call(patch, 'summary')
+        ? normalizeNullableText((patch as any).summary)
+        : prev?.summary ?? null,
+      status: Object.prototype.hasOwnProperty.call(patch, 'status')
+        ? normalizeStatus((patch as any).status)
+        : prev?.status ?? 'draft',
+      createdAt: prev?.createdAt ?? '',
+      updatedAt: prev?.updatedAt ?? ''
+    }
+
+    await this.enqueue(() => {
+      const db = this.mustDb()
+      db.prepare(
+        `INSERT INTO journal_entries (day, intentions, notes, reflections, summary, status, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+         ON CONFLICT(day) DO UPDATE SET
+           intentions = excluded.intentions,
+           notes = excluded.notes,
+           reflections = excluded.reflections,
+           summary = excluded.summary,
+           status = excluded.status,
+           updated_at = CURRENT_TIMESTAMP`
+      ).run(
+        next.dayKey,
+        next.intentions,
+        next.notes,
+        next.reflections,
+        next.summary,
+        next.status
+      )
+    })
+
+    const saved = await this.getJournalEntry(k)
+    if (!saved) {
+      // Should be impossible; keep defensive.
+      throw new Error('Failed to save journal entry')
+    }
+    return saved
+  }
+
+  async deleteJournalEntry(dayKey: string): Promise<void> {
+    const k = String(dayKey ?? '').trim()
+    if (!k) return
+    await this.enqueue(() => {
+      const db = this.mustDb()
+      db.prepare('DELETE FROM journal_entries WHERE day = ?').run(k)
+    })
+  }
+
+  async listJournalEntriesInRange(opts: {
+    startDayKey: string
+    endDayKey: string
+  }): Promise<JournalEntryDTO[]> {
+    const start = String(opts.startDayKey ?? '').trim()
+    const end = String(opts.endDayKey ?? '').trim()
+    if (!start || !end) throw new Error('startDayKey and endDayKey are required')
+    if (start > end) throw new Error('startDayKey must be <= endDayKey')
+
+    return this.enqueue(() => {
+      const db = this.mustDb()
+      const rows = db
+        .prepare(
+          `SELECT day, intentions, notes, reflections, summary, status, created_at, updated_at
+           FROM journal_entries
+           WHERE day >= ? AND day <= ?
+           ORDER BY day ASC`
+        )
+        .all(start, end) as any[]
+      return rows.map(mapJournalEntryRow)
+    })
+  }
+
   async markScreenshotsDeletedByIds(ids: number[]): Promise<void> {
     if (ids.length === 0) return
     await this.enqueue(() => {
@@ -905,6 +1028,32 @@ function mapTimelineCardRow(r: any): TimelineCardRow {
 
 function normalizeRelPath(p: string): string {
   return p.replaceAll('\\\\', '/').replaceAll('\\', '/')
+}
+
+function normalizeNullableText(v: unknown): string | null {
+  if (v === null || v === undefined) return null
+  const s = String(v)
+  const trimmed = s.replace(/\r\n/g, '\n').trimEnd()
+  return trimmed.length === 0 ? null : trimmed
+}
+
+function normalizeStatus(v: unknown): JournalEntryStatus {
+  const s = String(v ?? '').trim()
+  return s === 'complete' ? 'complete' : 'draft'
+}
+
+function mapJournalEntryRow(r: any): JournalEntryDTO {
+  const status = String(r.status ?? 'draft').trim() === 'complete' ? 'complete' : 'draft'
+  return {
+    dayKey: String(r.day),
+    intentions: r.intentions ?? null,
+    notes: r.notes ?? null,
+    reflections: r.reflections ?? null,
+    summary: r.summary ?? null,
+    status,
+    createdAt: String(r.created_at ?? ''),
+    updatedAt: String(r.updated_at ?? '')
+  }
 }
 
 function absPathToRelUnderUserData(userDataPath: string, absFile: string): string | null {

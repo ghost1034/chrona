@@ -16,6 +16,7 @@ import { applyAutoStart } from './autostart'
 import { registerChronaMediaProtocol, registerChronaMediaScheme } from './mediaProtocol'
 import { AskService } from './ask/ask'
 import { DashboardService } from './dashboard/dashboard'
+import { JournalService } from './journal/journal'
 
 let quitting = false
 let mainWindow: BrowserWindow | null = null
@@ -193,8 +194,9 @@ async function main() {
 
   const ask = new AskService({ storage, log })
   const dashboard = new DashboardService({ storage })
+  const journal = new JournalService({ storage, log })
 
-  registerIpc({ settings, capture, storage, analysis, retention, ask, dashboard, log })
+  registerIpc({ settings, capture, storage, analysis, retention, ask, dashboard, journal, log })
 
   win.webContents.on('render-process-gone', (_event, details) => {
     log.error('renderer.gone', { reason: details.reason, exitCode: details.exitCode })
