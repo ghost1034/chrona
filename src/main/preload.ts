@@ -49,6 +49,9 @@ contextBridge.exposeInMainWorld('chrona', {
 
   askChrona: (req: IpcContract['ask:run']['req']) => invoke('ask:run', req),
 
+  getDashboardStats: (scope: { startTs: number; endTs: number }, options?: { includeSystem?: boolean }) =>
+    invoke('dashboard:get', { scope, options }),
+
   onRecordingStateChanged: (cb: (state: IpcContract['capture:getState']['res']) => void) => {
     const listener = (_event: unknown, payload: IpcContract['capture:getState']['res']) => cb(payload)
     ipcRenderer.on(IPC_EVENTS.recordingStateChanged, listener)
@@ -140,6 +143,11 @@ export type ChronaApi = {
   resolveFileUrl: (relPath: string) => InvokeResult<'storage:resolveFileUrl'>
 
   askChrona: (req: IpcContract['ask:run']['req']) => InvokeResult<'ask:run'>
+
+  getDashboardStats: (
+    scope: { startTs: number; endTs: number },
+    options?: { includeSystem?: boolean }
+  ) => InvokeResult<'dashboard:get'>
 
   onRecordingStateChanged: (
     cb: (state: IpcContract['capture:getState']['res']) => void
