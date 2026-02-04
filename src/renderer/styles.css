@@ -71,6 +71,68 @@ textarea {
   align-items: start;
 }
 
+.settingsWrap {
+  border: 1px solid var(--stroke);
+  background: linear-gradient(180deg, var(--card), var(--card2));
+  border-radius: 14px;
+  box-shadow: 0 18px 60px var(--shadow);
+  display: grid;
+  grid-template-columns: 240px 1fr;
+  overflow: hidden;
+  min-height: calc(100vh - 180px);
+}
+
+.settingsNav {
+  border-right: 1px solid rgba(255, 255, 255, 0.10);
+  padding: 14px;
+  display: grid;
+  gap: 8px;
+  background: rgba(0, 0, 0, 0.12);
+}
+
+.settingsNavTitle {
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  margin-bottom: 6px;
+}
+
+.settingsNavItem {
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(0, 0, 0, 0.12);
+  color: var(--text);
+  border-radius: 12px;
+  padding: 10px 10px;
+  cursor: pointer;
+  text-align: left;
+}
+
+.settingsNavItem:hover {
+  border-color: rgba(255, 255, 255, 0.20);
+  background: rgba(0, 0, 0, 0.18);
+}
+
+.settingsNavItem.active {
+  border-color: rgba(255, 122, 24, 0.55);
+  background: linear-gradient(180deg, rgba(255, 122, 24, 0.18), rgba(0, 0, 0, 0.10));
+}
+
+.settingsBody {
+  padding: 14px;
+  overflow: auto;
+}
+
+.settingsSection {
+  max-width: 860px;
+}
+
+.input.settingsTextarea {
+  width: 100%;
+  min-height: 44px;
+  resize: vertical;
+  line-height: 1.45;
+}
+
 .timeline,
 .sidePanel {
   border: 1px solid var(--stroke);
@@ -775,6 +837,19 @@ textarea {
   }
   .layout {
     grid-template-columns: 1fr;
+  }
+
+  .settingsWrap {
+    grid-template-columns: 1fr;
+    min-height: unset;
+  }
+
+  .settingsNav {
+    border-right: 0;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.10);
+    grid-auto-flow: column;
+    grid-auto-columns: minmax(160px, auto);
+    overflow: auto;
   }
   .timelineScroll {
     height: 60vh;

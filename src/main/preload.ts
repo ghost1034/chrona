@@ -111,6 +111,12 @@ contextBridge.exposeInMainWorld('chrona', {
     ) => cb(payload)
     ipcRenderer.on(IPC_EVENTS.storageUsageUpdated, listener)
     return () => ipcRenderer.removeListener(IPC_EVENTS.storageUsageUpdated, listener)
+  },
+
+  onNavigate: (cb: (payload: { view: string }) => void) => {
+    const listener = (_event: unknown, payload: { view: string }) => cb(payload)
+    ipcRenderer.on(IPC_EVENTS.navigate, listener)
+    return () => ipcRenderer.removeListener(IPC_EVENTS.navigate, listener)
   }
 })
 
@@ -190,4 +196,6 @@ export type ChronaApi = {
     recordingsLimitBytes: number
     timelapsesLimitBytes: number
   }) => void) => () => void
+
+  onNavigate: (cb: (payload: { view: string }) => void) => () => void
 }

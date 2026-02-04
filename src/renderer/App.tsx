@@ -5,6 +5,7 @@ import { formatBytes } from '../shared/format'
 import type { AskSourceRef } from '../shared/ask'
 import type { JournalDraftDTO, JournalEntryDTO, JournalEntryPatch } from '../shared/journal'
 import { DashboardView } from './DashboardView'
+import { SettingsView } from './SettingsView'
 
 type DisplayInfo = { id: string; bounds: { width: number; height: number }; scaleFactor: number }
 
@@ -38,6 +39,18 @@ export function App() {
   const [timelapsesEnabled, setTimelapsesEnabled] = useState<boolean>(false)
   const [autoStartEnabled, setAutoStartEnabled] = useState<boolean>(false)
 
+  const [timelapseFps, setTimelapseFps] = useState<number>(2)
+
+  const [geminiModel, setGeminiModel] = useState<string>('gemini-2.5-flash')
+  const [geminiRequestTimeoutMs, setGeminiRequestTimeoutMs] = useState<number>(60_000)
+  const [geminiMaxAttempts, setGeminiMaxAttempts] = useState<number>(3)
+  const [geminiLogBodies, setGeminiLogBodies] = useState<boolean>(false)
+
+  const [promptPreambleTranscribe, setPromptPreambleTranscribe] = useState<string>('')
+  const [promptPreambleCards, setPromptPreambleCards] = useState<string>('')
+  const [promptPreambleAsk, setPromptPreambleAsk] = useState<string>('')
+  const [promptPreambleJournalDraft, setPromptPreambleJournalDraft] = useState<string>('')
+
   const [storageUsage, setStorageUsage] = useState<{
     recordingsBytes: number
     timelapsesBytes: number
@@ -50,7 +63,9 @@ export function App() {
   const [dayKey, setDayKey] = useState<string>(() => dayKeyFromUnixSeconds(Math.floor(Date.now() / 1000)))
   const [cards, setCards] = useState<TimelineCardDTO[]>([])
   const [selectedCardId, setSelectedCardId] = useState<number | null>(null)
-  const [view, setView] = useState<'timeline' | 'review' | 'ask' | 'dashboard' | 'journal'>('timeline')
+  const [view, setView] = useState<'timeline' | 'review' | 'ask' | 'dashboard' | 'journal' | 'settings'>(
+    'timeline'
+  )
   const [reviewCoverage, setReviewCoverage] = useState<Record<number, number>>({})
 
   const [timelinePxPerHour, setTimelinePxPerHour] = useState<number>(TIMELINE_ZOOM_DEFAULT_PX_PER_HOUR)
@@ -126,9 +141,20 @@ export function App() {
 
       const settings = await window.chrona.getSettings()
       setTimelapsesEnabled(!!settings.timelapsesEnabled)
+      setTimelapseFps(Number(settings.timelapseFps ?? 2) || 2)
       setTimelinePxPerHour(
         clampTimelinePxPerHour(settings.timelinePxPerHour ?? TIMELINE_ZOOM_DEFAULT_PX_PER_HOUR)
       )
+
+      setGeminiModel(String((settings as any).geminiModel ?? 'gemini-2.5-flash'))
+      setGeminiRequestTimeoutMs(Number((settings as any).geminiRequestTimeoutMs ?? 60_000) || 60_000)
+      setGeminiMaxAttempts(Number((settings as any).geminiMaxAttempts ?? 3) || 3)
+      setGeminiLogBodies(!!(settings as any).geminiLogBodies)
+
+      setPromptPreambleTranscribe(String((settings as any).promptPreambleTranscribe ?? ''))
+      setPromptPreambleCards(String((settings as any).promptPreambleCards ?? ''))
+      setPromptPreambleAsk(String((settings as any).promptPreambleAsk ?? ''))
+      setPromptPreambleJournalDraft(String((settings as any).promptPreambleJournalDraft ?? ''))
       setAutoStartEnabled((await window.chrona.getAutoStartEnabled()).enabled)
 
       const usage = await window.chrona.getStorageUsage()
@@ -158,12 +184,32 @@ export function App() {
       setStorageUsage(u)
     })
 
+    const unsubNav = window.chrona.onNavigate((p) => {
+      const v = String((p as any)?.view ?? '')
+      if (v === 'settings') setView('settings')
+    })
+
     return () => {
       unsubState()
       unsubErr()
       unsubAnalysis()
       unsubUsage()
+      unsubNav()
     }
+  }, [])
+
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (!(e.metaKey || e.ctrlKey)) return
+      if (e.key !== ',') return
+      const el = document.activeElement
+      const tag = (el && (el as any).tagName ? String((el as any).tagName).toLowerCase() : '')
+      if (tag === 'input' || tag === 'textarea' || tag === 'select') return
+      e.preventDefault()
+      setView('settings')
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
   }, [])
 
   useEffect(() => {
@@ -325,6 +371,37 @@ export function App() {
   async function onToggleTimelapsesEnabled(enabled: boolean) {
     setTimelapsesEnabled(enabled)
     await window.chrona.updateSettings({ timelapsesEnabled: enabled })
+  }
+
+  async function onSaveTimelapseFps() {
+    const fps = Math.max(1, Math.floor(Number(timelapseFps)))
+    if (!Number.isFinite(fps) || fps <= 0) return
+    setTimelapseFps(fps)
+    await window.chrona.updateSettings({ timelapseFps: fps })
+  }
+
+  async function onSaveGeminiRuntime() {
+    const timeoutMs = Math.max(1000, Math.floor(Number(geminiRequestTimeoutMs)))
+    const attempts = Math.max(1, Math.floor(Number(geminiMaxAttempts)))
+    const model = String(geminiModel || '').trim() || 'gemini-2.5-flash'
+    setGeminiModel(model)
+    setGeminiRequestTimeoutMs(timeoutMs)
+    setGeminiMaxAttempts(attempts)
+    await window.chrona.updateSettings({
+      geminiModel: model as any,
+      geminiRequestTimeoutMs: timeoutMs as any,
+      geminiMaxAttempts: attempts as any,
+      geminiLogBodies: !!geminiLogBodies as any
+    } as any)
+  }
+
+  async function onSavePromptPreambles() {
+    await window.chrona.updateSettings({
+      promptPreambleTranscribe: promptPreambleTranscribe as any,
+      promptPreambleCards: promptPreambleCards as any,
+      promptPreambleAsk: promptPreambleAsk as any,
+      promptPreambleJournalDraft: promptPreambleJournalDraft as any
+    } as any)
   }
 
   async function onToggleAutoStartEnabled(enabled: boolean) {
@@ -642,6 +719,12 @@ export function App() {
           >
             Journal
           </button>
+          <button
+            className={`btn ${view === 'settings' ? 'btn-accent' : ''}`}
+            onClick={() => setView('settings')}
+          >
+            Settings
+          </button>
           <button className="btn" disabled={view !== 'timeline'} onClick={() => zoomOut()}>
             Zoom -
           </button>
@@ -899,6 +982,61 @@ export function App() {
               </div>
             </div>
           </section>
+        ) : view === 'settings' ? (
+          <section className="timeline">
+            <div className="timelineScroll">
+              <SettingsView
+                statusLine={statusLine}
+                recording={recording}
+                systemPaused={systemPaused}
+                lastError={lastError}
+                interval={interval}
+                setInterval={setInterval}
+                onSaveInterval={onSaveInterval}
+                displays={displays}
+                selectedDisplayId={selectedDisplayId}
+                onSelectDisplay={onSelectDisplay}
+                analysisLine={analysisLine}
+                onRunAnalysisTick={onRunAnalysisTick}
+                storageUsage={storageUsage}
+                limitRecordingsGb={limitRecordingsGb}
+                setLimitRecordingsGb={setLimitRecordingsGb}
+                limitTimelapsesGb={limitTimelapsesGb}
+                setLimitTimelapsesGb={setLimitTimelapsesGb}
+                onSaveStorageLimits={onSaveStorageLimits}
+                onPurgeNow={onPurgeNow}
+                timelapsesEnabled={timelapsesEnabled}
+                onToggleTimelapsesEnabled={onToggleTimelapsesEnabled}
+                timelapseFps={timelapseFps}
+                setTimelapseFps={setTimelapseFps}
+                onSaveTimelapseFps={onSaveTimelapseFps}
+                autoStartEnabled={autoStartEnabled}
+                onToggleAutoStartEnabled={onToggleAutoStartEnabled}
+                hasGeminiKey={hasGeminiKey}
+                geminiKeyInput={geminiKeyInput}
+                setGeminiKeyInput={setGeminiKeyInput}
+                onSaveGeminiKey={onSaveGeminiKey}
+                geminiModel={geminiModel}
+                setGeminiModel={setGeminiModel}
+                geminiRequestTimeoutMs={geminiRequestTimeoutMs}
+                setGeminiRequestTimeoutMs={setGeminiRequestTimeoutMs}
+                geminiMaxAttempts={geminiMaxAttempts}
+                setGeminiMaxAttempts={setGeminiMaxAttempts}
+                geminiLogBodies={geminiLogBodies}
+                setGeminiLogBodies={setGeminiLogBodies}
+                onSaveGeminiRuntime={onSaveGeminiRuntime}
+                promptPreambleTranscribe={promptPreambleTranscribe}
+                setPromptPreambleTranscribe={setPromptPreambleTranscribe}
+                promptPreambleCards={promptPreambleCards}
+                setPromptPreambleCards={setPromptPreambleCards}
+                promptPreambleAsk={promptPreambleAsk}
+                setPromptPreambleAsk={setPromptPreambleAsk}
+                promptPreambleJournalDraft={promptPreambleJournalDraft}
+                setPromptPreambleJournalDraft={setPromptPreambleJournalDraft}
+                onSavePromptPreambles={onSavePromptPreambles}
+              />
+            </div>
+          </section>
         ) : (
           <section className="timeline">
             <div className="timelineScroll">
@@ -981,30 +1119,14 @@ export function App() {
               </div>
 
               <div className="block">
-                <div className="sideTitle">Gemini</div>
+                <div className="sideTitle">System</div>
                 <div className="sideMeta">
-                  Key: {hasGeminiKey === null ? '...' : hasGeminiKey ? 'configured' : 'missing'}
+                  Gemini key: {hasGeminiKey === null ? '...' : hasGeminiKey ? 'configured' : 'missing'} · Capture:
+                  {recording ? ' recording' : ' idle'}
                 </div>
                 <div className="row">
-                  <input
-                    className="input"
-                    type="password"
-                    value={geminiKeyInput}
-                    placeholder="AIza..."
-                    onChange={(e) => setGeminiKeyInput(e.target.value)}
-                  />
-                  <button className="btn" onClick={() => void onSaveGeminiKey()}>
-                    Save
-                  </button>
-                </div>
-              </div>
-
-              <div className="block">
-                <div className="sideTitle">Capture</div>
-                <div className="sideMeta">{statusLine}</div>
-                <div className="row">
-                  <button className="btn btn-accent" onClick={onToggleRecording}>
-                    {recording ? 'Stop recording' : 'Start recording'}
+                  <button className="btn" onClick={() => setView('settings')}>
+                    Open Settings
                   </button>
                 </div>
               </div>
@@ -1015,7 +1137,7 @@ export function App() {
               <div className="sideMeta">Activity stats and trends for a selectable range.</div>
 
               <div className="block">
-                <div className="sideTitle">Capture</div>
+                <div className="sideTitle">Quick capture</div>
                 <div className="sideMeta">{statusLine}</div>
                 <div className="row">
                   <button className="btn btn-accent" onClick={onToggleRecording}>
@@ -1033,22 +1155,14 @@ export function App() {
                   </div>
                 ) : null}
               </div>
-
               <div className="block">
-                <div className="sideTitle">Gemini</div>
+                <div className="sideTitle">Settings</div>
                 <div className="sideMeta">
-                  Key: {hasGeminiKey === null ? '...' : hasGeminiKey ? 'configured' : 'missing'}
+                  Gemini key: {hasGeminiKey === null ? '...' : hasGeminiKey ? 'configured' : 'missing'}
                 </div>
                 <div className="row">
-                  <input
-                    className="input"
-                    type="password"
-                    value={geminiKeyInput}
-                    placeholder="AIza..."
-                    onChange={(e) => setGeminiKeyInput(e.target.value)}
-                  />
-                  <button className="btn" onClick={() => void onSaveGeminiKey()}>
-                    Save
+                  <button className="btn" onClick={() => setView('settings')}>
+                    Open Settings
                   </button>
                 </div>
               </div>
@@ -1193,17 +1307,13 @@ export function App() {
               </div>
 
               <div className="block">
-                <div className="sideTitle">Gemini key</div>
+                <div className="sideTitle">Settings</div>
+                <div className="sideMeta">
+                  Gemini key: {hasGeminiKey === null ? '...' : hasGeminiKey ? 'configured' : 'missing'}
+                </div>
                 <div className="row">
-                  <input
-                    className="input"
-                    type="password"
-                    value={geminiKeyInput}
-                    placeholder="AIza..."
-                    onChange={(e) => setGeminiKeyInput(e.target.value)}
-                  />
-                  <button className="btn" onClick={() => void onSaveGeminiKey()}>
-                    Save
+                  <button className="btn" onClick={() => setView('settings')}>
+                    Open Settings
                   </button>
                 </div>
               </div>
@@ -1290,54 +1400,16 @@ export function App() {
             </div>
           ) : (
             <div className="sidePanel">
-              <div className="sideTitle">Capture</div>
+              <div className="sideTitle">Quick capture</div>
+              <div className="sideMeta">{statusLine}</div>
 
               <div className="row">
                 <button className="btn btn-accent" onClick={onToggleRecording}>
                   {recording ? 'Stop recording' : 'Start recording'}
                 </button>
-                <div className="mono">{statusLine}</div>
-              </div>
-
-              <div className="row">
-                <label className="label">
-                  Interval (seconds)
-                  <input
-                    className="input"
-                    type="number"
-                    min={1}
-                    step={1}
-                    value={interval ?? ''}
-                    onChange={(e) => setInterval(Number(e.target.value))}
-                  />
-                </label>
-              </div>
-
-              <div className="row">
-                <button className="btn" onClick={onSaveInterval}>
-                  Save
+                <button className="btn" onClick={() => setView('settings')}>
+                  Settings
                 </button>
-                <button className="btn" onClick={() => void window.chrona.openRecordingsFolder()}>
-                  Open recordings
-                </button>
-              </div>
-
-              <div className="row">
-                <label className="label">
-                  Capture display
-                  <select
-                    className="input"
-                    value={selectedDisplayId ?? 'auto'}
-                    onChange={(e) => void onSelectDisplay(e.target.value)}
-                  >
-                    <option value="auto">Auto (cursor)</option>
-                    {displays.map((d) => (
-                      <option key={d.id} value={d.id}>
-                        Display {d.id} ({d.bounds.width}x{d.bounds.height} @ {d.scaleFactor}x)
-                      </option>
-                    ))}
-                  </select>
-                </label>
               </div>
 
               {systemPaused ? (
@@ -1351,103 +1423,6 @@ export function App() {
                   <div className="mono error">Last capture error: {lastError}</div>
                 </div>
               ) : null}
-
-              <div className="row">
-                <button className="btn" onClick={() => void onRunAnalysisTick()}>
-                  Run analysis tick
-                </button>
-                <div className="mono">{analysisLine || '...'}</div>
-              </div>
-
-              <div className="block">
-                <div className="sideTitle">Storage</div>
-                <div className="sideMeta">
-                  {storageUsage
-                    ? `Recordings: ${formatBytes(storageUsage.recordingsBytes)} / ${formatBytes(storageUsage.recordingsLimitBytes)} · Timelapses: ${formatBytes(storageUsage.timelapsesBytes)} / ${formatBytes(storageUsage.timelapsesLimitBytes)}`
-                    : 'Loading...'}
-                </div>
-
-                <div className="row">
-                  <label className="label">
-                    Recordings limit (GB)
-                    <input
-                      className="input"
-                      type="number"
-                      min={1}
-                      step={1}
-                      value={limitRecordingsGb}
-                      onChange={(e) => setLimitRecordingsGb(e.target.value)}
-                    />
-                  </label>
-                </div>
-
-                <div className="row">
-                  <label className="label">
-                    Timelapses limit (GB)
-                    <input
-                      className="input"
-                      type="number"
-                      min={1}
-                      step={1}
-                      value={limitTimelapsesGb}
-                      onChange={(e) => setLimitTimelapsesGb(e.target.value)}
-                    />
-                  </label>
-                </div>
-
-                <div className="row">
-                  <button className="btn" onClick={() => void onSaveStorageLimits()}>
-                    Save limits
-                  </button>
-                  <button className="btn" onClick={() => void onPurgeNow()}>
-                    Purge now
-                  </button>
-                </div>
-
-                <div className="row">
-                  <label className="pill">
-                    <input
-                      type="checkbox"
-                      checked={timelapsesEnabled}
-                      onChange={(e) => void onToggleTimelapsesEnabled(e.target.checked)}
-                    />
-                    Generate timelapses
-                  </label>
-                </div>
-
-                <div className="row">
-                  <label className="pill">
-                    <input
-                      type="checkbox"
-                      checked={autoStartEnabled}
-                      onChange={(e) => void onToggleAutoStartEnabled(e.target.checked)}
-                    />
-                    Launch at login
-                  </label>
-                </div>
-              </div>
-
-              <div className="row">
-                <div className="mono">
-                  Gemini key: {hasGeminiKey === null ? '...' : hasGeminiKey ? 'configured' : 'missing'}
-                </div>
-              </div>
-
-              <div className="row">
-                <label className="label">
-                  Set Gemini API key
-                  <input
-                    className="input"
-                    type="password"
-                    value={geminiKeyInput}
-                    placeholder="AIza..."
-                    onChange={(e) => setGeminiKeyInput(e.target.value)}
-                  />
-                </label>
-                <button className="btn" onClick={() => void onSaveGeminiKey()}>
-                  Save key
-                </button>
-              </div>
             </div>
           )}
         </aside>

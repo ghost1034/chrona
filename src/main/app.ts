@@ -192,9 +192,9 @@ async function main() {
   })
   retention.start()
 
-  const ask = new AskService({ storage, log })
+  const ask = new AskService({ storage, log, settings })
   const dashboard = new DashboardService({ storage })
-  const journal = new JournalService({ storage, log })
+  const journal = new JournalService({ storage, log, settings })
 
   registerIpc({ settings, capture, storage, analysis, retention, ask, dashboard, journal, log })
 
@@ -216,6 +216,11 @@ async function main() {
     onOpenRecordingsFolder: () => {
       const p = storage.resolveRelPath('recordings')
       void shell.openPath(p)
+    },
+    onOpenSettings: () => {
+      win.show()
+      win.focus()
+      win.webContents.send(IPC_EVENTS.navigate, { view: 'settings' })
     },
     onOpen: () => {
       win.show()
