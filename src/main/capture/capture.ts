@@ -1,4 +1,4 @@
-import type { DisplayInfo, CaptureState } from '../../shared/ipc'
+import type { DisplayInfo, CaptureAccessInfo, CaptureState } from '../../shared/ipc'
 import { desktopCapturer, powerMonitor, screen } from 'electron'
 import type { Logger } from '../logger'
 import type { SettingsStore } from '../settings'
@@ -75,7 +75,51 @@ export class CaptureService {
     }
   }
 
+  async probeAccess(): Promise<CaptureAccessInfo> {
+    if (process.platform !== 'darwin') {
+      return { status: 'not_applicable', message: null }
+    }
+
+    try {
+      // Use a tiny thumbnail to keep this probe cheap.
+      const sources = await desktopCapturer.getSources({
+        types: ['screen'],
+        thumbnailSize: { width: 64, height: 64 },
+        fetchWindowIcons: false
+      })
+
+      const source = sources[0]
+      if (!source) return { status: 'denied', message: 'No screen sources available (Screen Recording permission?)' }
+
+      if (source.thumbnail.isEmpty()) {
+        return { status: 'denied', message: 'Capture thumbnail is empty (Screen Recording permission?)' }
+      }
+
+      if (looksLikeMacPermissionBlackFrame(source.thumbnail)) {
+        return { status: 'denied', message: 'Capture looks blank/black (Screen Recording permission?)' }
+      }
+
+      return { status: 'granted', message: null }
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e)
+      return { status: 'denied', message }
+    }
+  }
+
   async setEnabled(enabled: boolean): Promise<CaptureState> {
+    if (enabled && process.platform === 'darwin') {
+      const access = await this.probeAccess()
+      if (access.status !== 'granted' && access.status !== 'not_applicable') {
+        this.desiredRecordingEnabled = false
+        this.lastError = access.message ?? 'Screen Recording permission is required on macOS'
+        this.log.warn('capture.permissionMissing', { message: this.lastError })
+        this.events.captureError({ message: this.lastError })
+        this.updateRunningState()
+        this.emitState()
+        return this.getState()
+      }
+    }
+
     this.desiredRecordingEnabled = enabled
     this.log.info('capture.setEnabled', { enabled })
     this.updateRunningState()
@@ -224,6 +268,9 @@ export class CaptureService {
 
     const img = source.thumbnail
     if (img.isEmpty()) throw new Error('Capture thumbnail is empty')
+    if (process.platform === 'darwin' && looksLikeMacPermissionBlackFrame(img)) {
+      throw new Error('Capture looks blank/black (Screen Recording permission?)')
+    }
 
     const jpegBytes = img.toJPEG(85)
     await this.storage.saveScreenshotJpeg({ capturedAtMs, jpegBytes })
@@ -293,4 +340,33 @@ export class CaptureService {
   private emitState() {
     this.events.recordingStateChanged(this.getState())
   }
+}
+
+function looksLikeMacPermissionBlackFrame(img: Electron.NativeImage): boolean {
+  // On macOS without Screen Recording permission, desktopCapturer often returns a solid black frame.
+  // Heuristic: sample a small grid of pixels; if all are near-black, treat as missing permission.
+  const size = img.getSize()
+  const w = Math.max(0, size.width)
+  const h = Math.max(0, size.height)
+  if (w === 0 || h === 0) return true
+
+  // Avoid heavy work on very large frames.
+  const bmp = img.toBitmap()
+  if (!bmp || bmp.byteLength < w * h * 4) return false
+
+  const xs = [0, Math.floor(w / 4), Math.floor(w / 2), Math.floor((3 * w) / 4), w - 1]
+  const ys = [0, Math.floor(h / 4), Math.floor(h / 2), Math.floor((3 * h) / 4), h - 1]
+
+  for (const y of ys) {
+    for (const x of xs) {
+      const idx = (y * w + x) * 4
+      const b = bmp[idx] ?? 0
+      const g = bmp[idx + 1] ?? 0
+      const r = bmp[idx + 2] ?? 0
+      // If any sampled pixel has visible brightness, assume it's not the permission-black frame.
+      if (r + g + b > 12) return false
+    }
+  }
+
+  return true
 }

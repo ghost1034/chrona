@@ -13,6 +13,10 @@ contextBridge.exposeInMainWorld('chrona', {
   ping: () => invoke('app:ping', undefined),
   getAutoStartEnabled: () => invoke('app:getAutoStart', undefined),
   setAutoStartEnabled: (enabled: boolean) => invoke('app:setAutoStart', { enabled }),
+  openGeminiKeyPage: () => invoke('app:openGeminiKeyPage', undefined),
+  openMacScreenRecordingSettings: () => invoke('app:openMacScreenRecordingSettings', undefined),
+  relaunch: () => invoke('app:relaunch', undefined),
+  getSetupStatus: () => invoke('setup:getStatus', undefined),
   getSettings: () => invoke('settings:getAll', undefined),
   updateSettings: (patch: IpcContract['settings:update']['req']) =>
     invoke('settings:update', patch),
@@ -24,6 +28,7 @@ contextBridge.exposeInMainWorld('chrona', {
   setSelectedDisplay: (displayId: string | null) =>
     invoke('capture:setSelectedDisplay', { displayId }),
   listDisplays: () => invoke('capture:listDisplays', undefined),
+  probeCaptureAccess: () => invoke('capture:probeAccess', undefined),
   openRecordingsFolder: () => invoke('debug:openRecordingsFolder', undefined),
 
   runAnalysisTick: () => invoke('analysis:runTick', undefined),
@@ -31,6 +36,7 @@ contextBridge.exposeInMainWorld('chrona', {
 
   setGeminiApiKey: (apiKey: string) => invoke('gemini:setApiKey', { apiKey }),
   hasGeminiApiKey: () => invoke('gemini:hasApiKey', undefined),
+  testGeminiApiKey: (apiKey?: string | null) => invoke('gemini:testApiKey', { apiKey }),
 
   getTimelineDay: (dayKey: string) => invoke('timeline:getDay', { dayKey }),
   updateTimelineCardCategory: (opts: { cardId: number; category: string; subcategory?: string | null }) =>
@@ -126,6 +132,10 @@ export type ChronaApi = {
   ping: () => InvokeResult<'app:ping'>
   getAutoStartEnabled: () => InvokeResult<'app:getAutoStart'>
   setAutoStartEnabled: (enabled: boolean) => InvokeResult<'app:setAutoStart'>
+  openGeminiKeyPage: () => InvokeResult<'app:openGeminiKeyPage'>
+  openMacScreenRecordingSettings: () => InvokeResult<'app:openMacScreenRecordingSettings'>
+  relaunch: () => InvokeResult<'app:relaunch'>
+  getSetupStatus: () => InvokeResult<'setup:getStatus'>
   getSettings: () => InvokeResult<'settings:getAll'>
   updateSettings: (patch: IpcContract['settings:update']['req']) =>
     InvokeResult<'settings:update'>
@@ -135,6 +145,7 @@ export type ChronaApi = {
   setCaptureInterval: (intervalSeconds: number) => InvokeResult<'capture:setInterval'>
   setSelectedDisplay: (displayId: string | null) => InvokeResult<'capture:setSelectedDisplay'>
   listDisplays: () => InvokeResult<'capture:listDisplays'>
+  probeCaptureAccess: () => InvokeResult<'capture:probeAccess'>
   openRecordingsFolder: () => InvokeResult<'debug:openRecordingsFolder'>
 
   runAnalysisTick: () => InvokeResult<'analysis:runTick'>
@@ -142,6 +153,7 @@ export type ChronaApi = {
 
   setGeminiApiKey: (apiKey: string) => InvokeResult<'gemini:setApiKey'>
   hasGeminiApiKey: () => InvokeResult<'gemini:hasApiKey'>
+  testGeminiApiKey: (apiKey?: string | null) => InvokeResult<'gemini:testApiKey'>
 
   getTimelineDay: (dayKey: string) => InvokeResult<'timeline:getDay'>
   updateTimelineCardCategory: (opts: {

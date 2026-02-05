@@ -6,6 +6,7 @@ import type { StorageService } from './storage/storage'
 import { app, shell } from 'electron'
 import type { AnalysisService } from './analysis/analysis'
 import { getGeminiApiKey, setGeminiApiKey } from './gemini/keychain'
+import { GeminiService } from './gemini/gemini'
 import { clipboard, dialog } from 'electron'
 import {
   formatDayForClipboard,
@@ -39,6 +40,8 @@ export function registerIpc(opts: {
   journal: JournalService
   log: Logger
 }) {
+  const gemini = new GeminiService({ storage: opts.storage, log: opts.log, settings: opts.settings })
+
   handle('app:ping', async () => ({ ok: true, nowTs: Math.floor(Date.now() / 1000) }))
 
   handle('app:getAutoStart', async () => {
@@ -58,6 +61,51 @@ export function registerIpc(opts: {
       return { enabled }
     }
   })
+
+  handle('app:openGeminiKeyPage', async () => {
+    await shell.openExternal('https://aistudio.google.com/app/apikey')
+    return { ok: true }
+  })
+
+  handle('app:openMacScreenRecordingSettings', async () => {
+    if (process.platform !== 'darwin') return { ok: true }
+
+    // Best-effort. The exact deep link has changed across macOS versions.
+    const urls = [
+      'x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture',
+      'x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenRecording'
+    ]
+
+    for (const u of urls) {
+      try {
+        await shell.openExternal(u)
+        break
+      } catch {
+        // try next
+      }
+    }
+
+    return { ok: true }
+  })
+
+  handle('app:relaunch', async () => {
+    app.relaunch()
+    app.exit(0)
+    return { ok: true }
+  })
+
+  handle('setup:getStatus', async () => {
+    const k = await getGeminiApiKey()
+    const captureAccess =
+      process.platform === 'darwin'
+        ? await opts.capture.probeAccess()
+        : { status: 'not_applicable' as const, message: null }
+    return {
+      platform: process.platform,
+      hasGeminiKey: !!k,
+      captureAccess
+    }
+  })
   handle('settings:getAll', async () => opts.settings.getAll())
   handle('settings:update', async (patch) => opts.settings.update(patch ?? {}))
 
@@ -66,6 +114,7 @@ export function registerIpc(opts: {
   handle('capture:setInterval', async (req) => opts.capture.setIntervalSeconds(req.intervalSeconds))
   handle('capture:setSelectedDisplay', async (req) => opts.capture.setSelectedDisplay(req.displayId))
   handle('capture:listDisplays', async () => opts.capture.listDisplays())
+  handle('capture:probeAccess', async () => opts.capture.probeAccess())
 
   handle('debug:openRecordingsFolder', async () => {
     const p = opts.storage.resolveRelPath('recordings')
@@ -86,6 +135,11 @@ export function registerIpc(opts: {
   handle('gemini:hasApiKey', async () => {
     const k = await getGeminiApiKey()
     return { hasApiKey: !!k }
+  })
+
+  handle('gemini:testApiKey', async (req) => {
+    const res = await gemini.testApiKey({ apiKeyOverride: req.apiKey ?? null })
+    return res
   })
 
   handle('timeline:getDay', async (req) => {

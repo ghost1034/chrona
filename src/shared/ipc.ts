@@ -4,7 +4,7 @@ export type AppPingResponse = {
 }
 
 export type Settings = {
-  version: 5
+  version: 6
   captureIntervalSeconds: number
   captureSelectedDisplayId: string | null
   captureIncludeCursor: boolean
@@ -25,6 +25,22 @@ export type Settings = {
   promptPreambleCards: string
   promptPreambleAsk: string
   promptPreambleJournalDraft: string
+
+  onboardingVersion: number
+  onboardingCompleted: boolean
+}
+
+export type CaptureAccessStatus = 'granted' | 'denied' | 'unknown' | 'not_applicable'
+
+export type CaptureAccessInfo = {
+  status: CaptureAccessStatus
+  message: string | null
+}
+
+export type SetupStatus = {
+  platform: NodeJS.Platform
+  hasGeminiKey: boolean
+  captureAccess: CaptureAccessInfo
 }
 
 export type CaptureState = {
@@ -57,6 +73,26 @@ export type IpcContract = {
     req: { enabled: boolean }
     res: { enabled: boolean }
   }
+
+  'app:openGeminiKeyPage': {
+    req: void
+    res: { ok: true }
+  }
+
+  'app:openMacScreenRecordingSettings': {
+    req: void
+    res: { ok: true }
+  }
+
+  'app:relaunch': {
+    req: void
+    res: { ok: true }
+  }
+
+  'setup:getStatus': {
+    req: void
+    res: SetupStatus
+  }
   'settings:getAll': {
     req: void
     res: Settings
@@ -84,6 +120,11 @@ export type IpcContract = {
   'capture:listDisplays': {
     req: void
     res: DisplayInfo[]
+  }
+
+  'capture:probeAccess': {
+    req: void
+    res: CaptureAccessInfo
   }
   'debug:openRecordingsFolder': {
     req: void
@@ -114,6 +155,11 @@ export type IpcContract = {
   'gemini:hasApiKey': {
     req: void
     res: { hasApiKey: boolean }
+  }
+
+  'gemini:testApiKey': {
+    req: { apiKey?: string | null }
+    res: { ok: boolean; message: string }
   }
 
   'timeline:getDay': {
@@ -222,6 +268,10 @@ export const IPC_CHANNELS = {
   appPing: 'app:ping',
   appGetAutoStart: 'app:getAutoStart',
   appSetAutoStart: 'app:setAutoStart',
+  appOpenGeminiKeyPage: 'app:openGeminiKeyPage',
+  appOpenMacScreenRecordingSettings: 'app:openMacScreenRecordingSettings',
+  appRelaunch: 'app:relaunch',
+  setupGetStatus: 'setup:getStatus',
   settingsGetAll: 'settings:getAll',
   settingsUpdate: 'settings:update',
   captureGetState: 'capture:getState',
@@ -229,11 +279,13 @@ export const IPC_CHANNELS = {
   captureSetInterval: 'capture:setInterval',
   captureSetSelectedDisplay: 'capture:setSelectedDisplay',
   captureListDisplays: 'capture:listDisplays',
+  captureProbeAccess: 'capture:probeAccess',
   debugOpenRecordingsFolder: 'debug:openRecordingsFolder',
   analysisRunTick: 'analysis:runTick',
   analysisGetRecentBatches: 'analysis:getRecentBatches',
   geminiSetApiKey: 'gemini:setApiKey',
   geminiHasApiKey: 'gemini:hasApiKey',
+  geminiTestApiKey: 'gemini:testApiKey',
   timelineGetDay: 'timeline:getDay',
   timelineUpdateCardCategory: 'timeline:updateCardCategory',
   timelineCopyDayToClipboard: 'timeline:copyDayToClipboard',
