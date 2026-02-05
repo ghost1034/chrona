@@ -1,6 +1,6 @@
 import type Database from 'better-sqlite3'
 
-export const SCHEMA_VERSION = 2
+export const SCHEMA_VERSION = 3
 
 export function migrate(db: Database.Database) {
   const row = db.pragma('user_version', { simple: true }) as number
@@ -10,6 +10,7 @@ export function migrate(db: Database.Database) {
     db.transaction(() => {
       applyV1(db)
       applyV2(db)
+      applyV3(db)
       db.pragma(`user_version = ${SCHEMA_VERSION}`)
     })()
     return
@@ -18,6 +19,15 @@ export function migrate(db: Database.Database) {
   if (currentVersion === 1) {
     db.transaction(() => {
       applyV2(db)
+      applyV3(db)
+      db.pragma(`user_version = ${SCHEMA_VERSION}`)
+    })()
+    return
+  }
+
+  if (currentVersion === 2) {
+    db.transaction(() => {
+      applyV3(db)
       db.pragma(`user_version = ${SCHEMA_VERSION}`)
     })()
     return
@@ -149,5 +159,61 @@ function applyV2(db: Database.Database) {
     );
     CREATE INDEX IF NOT EXISTS idx_journal_entries_day ON journal_entries(day);
     CREATE INDEX IF NOT EXISTS idx_journal_entries_status ON journal_entries(status);
+  `)
+}
+
+function applyV3(db: Database.Database) {
+  // Full-text search index for timeline cards.
+  // We maintain this via triggers because timeline_cards uses soft-delete (is_deleted).
+  db.exec(`
+    CREATE VIRTUAL TABLE IF NOT EXISTS timeline_cards_fts USING fts5(
+      title,
+      summary,
+      detailed_summary,
+      metadata,
+      category,
+      subcategory,
+      tokenize = 'unicode61 remove_diacritics 2'
+    );
+
+    CREATE TRIGGER IF NOT EXISTS timeline_cards_fts_ai
+    AFTER INSERT ON timeline_cards
+    WHEN new.is_deleted = 0
+    BEGIN
+      INSERT INTO timeline_cards_fts(
+        rowid, title, summary, detailed_summary, metadata, category, subcategory
+      ) VALUES (
+        new.id, new.title, new.summary, new.detailed_summary, new.metadata, new.category, new.subcategory
+      );
+    END;
+
+    CREATE TRIGGER IF NOT EXISTS timeline_cards_fts_ad
+    AFTER DELETE ON timeline_cards
+    BEGIN
+      DELETE FROM timeline_cards_fts WHERE rowid = old.id;
+    END;
+
+    CREATE TRIGGER IF NOT EXISTS timeline_cards_fts_au
+    AFTER UPDATE ON timeline_cards
+    BEGIN
+      DELETE FROM timeline_cards_fts WHERE rowid = old.id;
+
+      INSERT INTO timeline_cards_fts(
+        rowid, title, summary, detailed_summary, metadata, category, subcategory
+      )
+      SELECT
+        new.id, new.title, new.summary, new.detailed_summary, new.metadata, new.category, new.subcategory
+      WHERE new.is_deleted = 0;
+    END;
+
+    -- Rebuild from source of truth on migration.
+    DELETE FROM timeline_cards_fts;
+    INSERT INTO timeline_cards_fts(
+      rowid, title, summary, detailed_summary, metadata, category, subcategory
+    )
+    SELECT
+      id, title, summary, detailed_summary, metadata, category, subcategory
+    FROM timeline_cards
+    WHERE is_deleted = 0;
   `)
 }

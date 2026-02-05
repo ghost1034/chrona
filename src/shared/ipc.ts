@@ -166,6 +166,11 @@ export type IpcContract = {
     req: { dayKey: string }
     res: { dayKey: string; cards: import('./timeline').TimelineCardDTO[] }
   }
+
+  'timeline:search': {
+    req: import('./timeline').TimelineSearchRequestDTO
+    res: import('./timeline').TimelineSearchResponseDTO
+  }
   'timeline:updateCardCategory': {
     req: { cardId: number; category: string; subcategory?: string | null }
     res: { ok: true }
@@ -287,6 +292,7 @@ export const IPC_CHANNELS = {
   geminiHasApiKey: 'gemini:hasApiKey',
   geminiTestApiKey: 'gemini:testApiKey',
   timelineGetDay: 'timeline:getDay',
+  timelineSearch: 'timeline:search',
   timelineUpdateCardCategory: 'timeline:updateCardCategory',
   timelineCopyDayToClipboard: 'timeline:copyDayToClipboard',
   timelineSaveMarkdownRange: 'timeline:saveMarkdownRange',
