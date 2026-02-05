@@ -4,6 +4,7 @@ import Database from 'better-sqlite3'
 import { migrate } from './schema'
 import { dayKeyFromUnixSeconds, formatClockAscii } from '../../shared/time'
 import type { JournalEntryDTO, JournalEntryPatch, JournalEntryStatus } from '../../shared/journal'
+import type { TimelineSearchRequestDTO } from '../../shared/timeline'
 
 export type ScreenshotRow = {
   id: number
@@ -58,6 +59,19 @@ export type TimelineCardInsert = {
   videoSummaryUrl?: string | null
   startDisplay?: string
   endDisplay?: string
+}
+
+export type TimelineSearchHitRow = {
+  cardRow: any
+  rank?: number | null
+  snippet?: string | null
+}
+
+export type TimelineSearchResult = {
+  hits: TimelineSearchHitRow[]
+  limit: number
+  offset: number
+  hasMore: boolean
 }
 
 export type ReviewRating = 'focus' | 'neutral' | 'distracted'
@@ -376,6 +390,139 @@ export class StorageService {
           'SELECT * FROM timeline_cards WHERE day = ? AND is_deleted = 0 ORDER BY start_ts ASC'
         )
         .all(dayKey) as any[]
+    })
+  }
+
+  async searchTimelineCards(req: TimelineSearchRequestDTO): Promise<TimelineSearchResult> {
+    const queryRaw = String(req?.query ?? '')
+    const query = queryRaw.trim()
+
+    const startTs = Math.floor(Number(req?.scope?.startTs))
+    const endTs = Math.floor(Number(req?.scope?.endTs))
+    if (!Number.isFinite(startTs) || !Number.isFinite(endTs) || endTs <= startTs) {
+      throw new Error('Invalid scope')
+    }
+
+    const limit = clampInt(req?.limit ?? 100, 1, 500)
+    const offset = clampInt(req?.offset ?? 0, 0, 1_000_000)
+
+    const filters = req?.filters ?? {}
+    const includeSystem = filters.includeSystem ?? true
+    const onlyErrors = !!filters.onlyErrors
+    const hasVideo = !!filters.hasVideo
+    const hasDetails = !!filters.hasDetails
+    const categories = Array.isArray(filters.categories)
+      ? filters.categories.map((c) => String(c)).filter((c) => c.trim().length > 0)
+      : []
+
+    return this.enqueue(() => {
+      const db = this.mustDb()
+
+      const where: string[] = []
+      const params: any[] = []
+
+      // Time overlap.
+      where.push('tc.is_deleted = 0')
+      where.push('tc.start_ts < ?')
+      params.push(endTs)
+      where.push('tc.end_ts > ?')
+      params.push(startTs)
+
+      if (onlyErrors) {
+        where.push("tc.category = 'System'")
+        where.push("(tc.subcategory = 'Error' OR tc.title = 'Processing failed')")
+      } else {
+        if (!includeSystem) where.push("tc.category != 'System'")
+        if (categories.length > 0) {
+          const placeholders = categories.map(() => '?').join(',')
+          where.push(`tc.category IN (${placeholders})`)
+          params.push(...categories)
+        }
+      }
+
+      if (hasVideo) where.push("tc.video_summary_url IS NOT NULL AND TRIM(tc.video_summary_url) != ''")
+      if (hasDetails) where.push("tc.detailed_summary IS NOT NULL AND TRIM(tc.detailed_summary) != ''")
+
+      const wantFts = query.length > 0
+      const hasFts =
+        wantFts &&
+        (db
+          .prepare("SELECT 1 AS ok FROM sqlite_master WHERE name = 'timeline_cards_fts' LIMIT 1")
+          .get() as any)?.ok === 1
+
+      const hits: TimelineSearchHitRow[] = []
+      const take = limit + 1
+
+      if (wantFts && hasFts) {
+        const ftsQuery = toFtsQuery(query)
+        const sql = `
+          SELECT
+            tc.*,
+            bm25(timeline_cards_fts) AS rank,
+            snippet(timeline_cards_fts, 1, '[', ']', '...', 10) AS snippet
+          FROM timeline_cards_fts
+          JOIN timeline_cards tc ON tc.id = timeline_cards_fts.rowid
+          WHERE timeline_cards_fts MATCH ?
+            AND ${where.join(' AND ')}
+          ORDER BY rank ASC, tc.start_ts DESC
+          LIMIT ? OFFSET ?
+        `
+
+        const rows = db
+          .prepare(sql)
+          .all(ftsQuery, ...params, take, offset) as any[]
+
+        for (const r of rows) {
+          hits.push({
+            cardRow: r,
+            rank: r.rank === null || r.rank === undefined ? null : Number(r.rank),
+            snippet: r.snippet === null || r.snippet === undefined ? null : String(r.snippet)
+          })
+        }
+      } else if (query.length > 0) {
+        // Fallback: LIKE search when FTS isn't available.
+        const like = `%${query.toLowerCase()}%`
+        const sql = `
+          SELECT tc.*
+          FROM timeline_cards tc
+          WHERE (
+            LOWER(COALESCE(tc.title, '')) LIKE ? OR
+            LOWER(COALESCE(tc.summary, '')) LIKE ? OR
+            LOWER(COALESCE(tc.detailed_summary, '')) LIKE ? OR
+            LOWER(COALESCE(tc.category, '')) LIKE ? OR
+            LOWER(COALESCE(tc.subcategory, '')) LIKE ? OR
+            LOWER(COALESCE(tc.metadata, '')) LIKE ?
+          )
+            AND ${where.join(' AND ')}
+          ORDER BY tc.start_ts DESC
+          LIMIT ? OFFSET ?
+        `
+        const rows = db
+          .prepare(sql)
+          .all(like, like, like, like, like, like, ...params, take, offset) as any[]
+        for (const r of rows) hits.push({ cardRow: r })
+      } else {
+        // Queryless search (filters-only). Keep stable ordering.
+        const sql = `
+          SELECT tc.*
+          FROM timeline_cards tc
+          WHERE ${where.join(' AND ')}
+          ORDER BY tc.start_ts DESC
+          LIMIT ? OFFSET ?
+        `
+        const rows = db.prepare(sql).all(...params, take, offset) as any[]
+        for (const r of rows) hits.push({ cardRow: r })
+      }
+
+      const hasMore = hits.length > limit
+      const trimmed = hasMore ? hits.slice(0, limit) : hits
+
+      return {
+        hits: trimmed,
+        limit,
+        offset,
+        hasMore
+      }
     })
   }
 
@@ -996,6 +1143,35 @@ export class StorageService {
 
     return normalizeRelPath(`recordings/screenshots/${dir}/${filename}`)
   }
+}
+
+function clampInt(n: unknown, min: number, max: number): number {
+  const x = Math.floor(Number(n))
+  if (!Number.isFinite(x)) return min
+  return Math.max(min, Math.min(max, x))
+}
+
+function toFtsQuery(q: string): string {
+  const tokens = String(q ?? '')
+    .trim()
+    .split(/\s+/g)
+    .map((t) => t.trim())
+    .filter(Boolean)
+
+  if (tokens.length === 0) return ''
+
+  const parts: string[] = []
+  for (const t of tokens) {
+    if (/^[A-Za-z0-9_]+$/.test(t)) {
+      // Prefix matching for a more forgiving UX.
+      parts.push(`${t}*`)
+    } else {
+      const escaped = t.replaceAll('"', '""')
+      parts.push(`"${escaped}"`)
+    }
+  }
+
+  return parts.join(' AND ')
 }
 
 function mapScreenshotRow(r: any): ScreenshotRow {

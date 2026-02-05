@@ -4,10 +4,18 @@ export type AppPingResponse = {
 }
 
 export type Settings = {
-  version: 6
+  version: 7
   captureIntervalSeconds: number
   captureSelectedDisplayId: string | null
   captureIncludeCursor: boolean
+
+  // Analysis scheduling + batching
+  analysisCheckIntervalSeconds: number
+  analysisLookbackSeconds: number
+  analysisBatchTargetDurationSec: number
+  analysisBatchMaxGapSec: number
+  analysisMinBatchDurationSec: number
+  analysisCardWindowLookbackSec: number
 
   storageLimitRecordingsBytes: number
   storageLimitTimelapsesBytes: number
@@ -166,6 +174,11 @@ export type IpcContract = {
     req: { dayKey: string }
     res: { dayKey: string; cards: import('./timeline').TimelineCardDTO[] }
   }
+
+  'timeline:search': {
+    req: import('./timeline').TimelineSearchRequestDTO
+    res: import('./timeline').TimelineSearchResponseDTO
+  }
   'timeline:updateCardCategory': {
     req: { cardId: number; category: string; subcategory?: string | null }
     res: { ok: true }
@@ -287,6 +300,7 @@ export const IPC_CHANNELS = {
   geminiHasApiKey: 'gemini:hasApiKey',
   geminiTestApiKey: 'gemini:testApiKey',
   timelineGetDay: 'timeline:getDay',
+  timelineSearch: 'timeline:search',
   timelineUpdateCardCategory: 'timeline:updateCardCategory',
   timelineCopyDayToClipboard: 'timeline:copyDayToClipboard',
   timelineSaveMarkdownRange: 'timeline:saveMarkdownRange',
