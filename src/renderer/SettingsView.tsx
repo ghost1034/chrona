@@ -11,6 +11,8 @@ export function SettingsView(props: {
   systemPaused: boolean
   lastError: string | null
 
+  onToggleRecording: () => Promise<void>
+
   interval: number | null
   setInterval: (n: number | null) => void
   onSaveInterval: () => Promise<void>
@@ -105,7 +107,7 @@ export function SettingsView(props: {
             <div className="sideMeta">{props.statusLine}</div>
 
             <div className="row">
-              <button className="btn btn-accent" onClick={() => void window.chrona.setRecordingEnabled(!props.recording)}>
+              <button className="btn btn-accent" onClick={() => void props.onToggleRecording()}>
                 {props.recording ? 'Stop recording' : 'Start recording'}
               </button>
               {props.systemPaused ? <div className="pill">System paused (sleep/lock)</div> : null}
