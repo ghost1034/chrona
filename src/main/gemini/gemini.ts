@@ -365,6 +365,61 @@ export class GeminiService {
     return stripCodeFences(extractGeminiText(text))
   }
 
+  async testApiKey(opts?: { apiKeyOverride?: string | null }): Promise<{ ok: boolean; message: string }> {
+    const cfg = await this.resolveConfig()
+
+    const override = (opts?.apiKeyOverride ?? null)?.trim() || null
+    const apiKey = override ?? (await getGeminiApiKey())
+
+    if (!apiKey && !process.env.CHRONA_GEMINI_MOCK) {
+      return { ok: false, message: 'No Gemini API key configured' }
+    }
+
+    if (process.env.CHRONA_GEMINI_MOCK) {
+      return { ok: true, message: 'CHRONA_GEMINI_MOCK is set (skipping real request)' }
+    }
+
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${cfg.model}:generateContent?key=${encodeURIComponent(
+      apiKey!
+    )}`
+
+    const requestBody = {
+      contents: [
+        {
+          role: 'user',
+          parts: [{ text: 'Reply with exactly: OK' }]
+        }
+      ],
+      generationConfig: {
+        temperature: 0.0
+      }
+    }
+
+    const callGroupId = `test_key:${Date.now()}`
+
+    try {
+      const { text, httpStatus } = await this.fetchWithRetry({
+        cfg,
+        url,
+        method: 'POST',
+        body: JSON.stringify(requestBody),
+        callGroupId,
+        batchId: null,
+        model: cfg.model,
+        operation: 'test_key'
+      })
+
+      const extracted = extractGeminiText(text).trim()
+      if (extracted.toLowerCase().includes('ok')) {
+        return { ok: true, message: 'Key verified' }
+      }
+      return { ok: true, message: `Received response (HTTP ${httpStatus})` }
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e)
+      return { ok: false, message }
+    }
+  }
+
   private async fetchWithRetry(opts: {
     cfg: GeminiConfig
     url: string
