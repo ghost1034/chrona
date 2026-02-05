@@ -150,6 +150,20 @@ export function registerIpc(opts: {
     }
   })
 
+  handle('timeline:search', async (req) => {
+    const res = await opts.storage.searchTimelineCards(req)
+    return {
+      hits: res.hits.map((h) => ({
+        card: mapCardRow(h.cardRow),
+        rank: h.rank ?? null,
+        snippet: h.snippet ?? null
+      })),
+      limit: res.limit,
+      offset: res.offset,
+      hasMore: res.hasMore
+    }
+  })
+
   handle('timeline:updateCardCategory', async (req) => {
     await opts.storage.updateCardCategory({
       cardId: req.cardId,

@@ -1,5 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import type { TimelineCardDTO } from '../shared/timeline'
+import type {
+  TimelineCardDTO,
+  TimelineSearchFiltersDTO,
+  TimelineSearchHitDTO,
+  TimelineSearchRequestDTO
+} from '../shared/timeline'
 import { dayKeyFromUnixSeconds, dayWindowForDayKey, formatClockAscii } from '../shared/time'
 import { formatBytes } from '../shared/format'
 import type { AskSourceRef } from '../shared/ask'
@@ -66,6 +71,26 @@ export function App() {
 
   const [dayKey, setDayKey] = useState<string>(() => dayKeyFromUnixSeconds(Math.floor(Date.now() / 1000)))
   const [cards, setCards] = useState<TimelineCardDTO[]>([])
+
+  const [timelineSearchQuery, setTimelineSearchQuery] = useState<string>('')
+  const [timelineSearchScopePreset, setTimelineSearchScopePreset] = useState<
+    'day' | 'today' | 'yesterday' | 'last7' | 'last30' | 'all'
+  >('day')
+  const [timelineFilters, setTimelineFilters] = useState<TimelineSearchFiltersDTO>({
+    includeSystem: true,
+    onlyErrors: false,
+    hasVideo: false,
+    hasDetails: false,
+    categories: []
+  })
+  const [timelineSearchLoading, setTimelineSearchLoading] = useState<boolean>(false)
+  const [timelineSearchError, setTimelineSearchError] = useState<string | null>(null)
+  const [timelineSearchHits, setTimelineSearchHits] = useState<TimelineSearchHitDTO[]>([])
+  const [timelineSearchHasMore, setTimelineSearchHasMore] = useState<boolean>(false)
+  const [timelineSearchOffset, setTimelineSearchOffset] = useState<number>(0)
+  const timelineSearchInputRef = useRef<HTMLInputElement | null>(null)
+  const timelineSearchReqKeyRef = useRef<string>('')
+  const timelineSearchRunIdRef = useRef<number>(0)
   const [selectedCardId, setSelectedCardId] = useState<number | null>(null)
   const [view, setView] = useState<
     'timeline' | 'review' | 'ask' | 'dashboard' | 'journal' | 'settings' | 'onboarding'
@@ -235,6 +260,27 @@ export function App() {
   }, [])
 
   useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (viewRef.current !== 'timeline') return
+      if (!(e.metaKey || e.ctrlKey)) return
+      if (e.key.toLowerCase() !== 'f') return
+
+      const el = document.activeElement
+      const tag = (el && (el as any).tagName ? String((el as any).tagName).toLowerCase() : '')
+      if (tag === 'textarea') return
+
+      e.preventDefault()
+      const input = timelineSearchInputRef.current
+      if (!input) return
+      input.focus()
+      input.select()
+    }
+
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [])
+
+  useEffect(() => {
     void (async () => {
       if (!selectedCard || !selectedCard.videoSummaryUrl) {
         setSelectedVideoUrl(null)
@@ -329,6 +375,95 @@ export function App() {
     return () => unsub()
   }, [dayKey])
 
+  useEffect(() => {
+    if (view !== 'timeline') return
+    if (timelineSearchScopePreset === 'day') {
+      setTimelineSearchLoading(false)
+      setTimelineSearchError(null)
+      setTimelineSearchHits([])
+      setTimelineSearchHasMore(false)
+      setTimelineSearchOffset(0)
+      timelineSearchReqKeyRef.current = ''
+      return
+    }
+
+    const q = timelineSearchQuery.trim()
+    const hasMeaningfulFilters = !!(
+      (timelineFilters.categories && timelineFilters.categories.length > 0) ||
+      timelineFilters.onlyErrors ||
+      timelineFilters.hasVideo ||
+      timelineFilters.hasDetails
+    )
+
+    if (q.length < 2 && !hasMeaningfulFilters) {
+      setTimelineSearchLoading(false)
+      setTimelineSearchError(null)
+      setTimelineSearchHits([])
+      setTimelineSearchHasMore(false)
+      setTimelineSearchOffset(0)
+      timelineSearchReqKeyRef.current = ''
+      return
+    }
+
+    const runId = (timelineSearchRunIdRef.current += 1)
+    setTimelineSearchLoading(true)
+    setTimelineSearchError(null)
+
+    const scope = getTimelineSearchScope(timelineSearchScopePreset, dayKey)
+    const limit = 200
+    const req: TimelineSearchRequestDTO = {
+      query: q,
+      scope,
+      filters: timelineFilters,
+      limit,
+      offset: 0
+    }
+
+    const reqKey = JSON.stringify({
+      scopePreset: timelineSearchScopePreset,
+      dayKey,
+      q,
+      filters: timelineFilters,
+      limit
+    })
+    timelineSearchReqKeyRef.current = reqKey
+
+    const t = window.setTimeout(() => {
+      void (async () => {
+        try {
+          const res = await window.chrona.searchTimeline(req)
+          if (timelineSearchRunIdRef.current !== runId) return
+          if (timelineSearchReqKeyRef.current !== reqKey) return
+          setTimelineSearchHits(res.hits)
+          setTimelineSearchHasMore(res.hasMore)
+          setTimelineSearchOffset(res.offset + res.limit)
+        } catch (e) {
+          if (timelineSearchRunIdRef.current !== runId) return
+          setTimelineSearchHits([])
+          setTimelineSearchHasMore(false)
+          setTimelineSearchOffset(0)
+          setTimelineSearchError(e instanceof Error ? e.message : String(e))
+        } finally {
+          if (timelineSearchRunIdRef.current === runId) setTimelineSearchLoading(false)
+        }
+      })()
+    }, 200)
+
+    return () => window.clearTimeout(t)
+  }, [
+    view,
+    timelineSearchScopePreset,
+    timelineSearchQuery,
+    timelineFilters,
+    dayKey
+  ])
+
+  useEffect(() => {
+    if (view !== 'timeline') return
+    if (timelineSearchScopePreset === 'day') return
+    setSelectedCardId(null)
+  }, [view, timelineSearchScopePreset])
+
   async function refreshDay(k: string, preserveSelection: boolean) {
     const day = await window.chrona.getTimelineDay(k)
     const nextCards = resolveOverlapsForDisplay(day.cards)
@@ -350,6 +485,55 @@ export function App() {
   async function refreshReview(k: string) {
     const res = await window.chrona.getReviewDay(k)
     setReviewCoverage(res.coverageByCardId)
+  }
+
+  function jumpToTimelineCard(c: TimelineCardDTO) {
+    pendingJumpRef.current = { dayKey: c.dayKey, cardId: c.id }
+    setTimelineSearchScopePreset('day')
+    setView('timeline')
+    setDayKey(c.dayKey)
+  }
+
+  async function loadMoreTimelineSearch() {
+    if (viewRef.current !== 'timeline') return
+    if (timelineSearchScopePreset === 'day') return
+    if (!timelineSearchHasMore) return
+
+    const q = timelineSearchQuery.trim()
+    const hasMeaningfulFilters = !!(
+      (timelineFilters.categories && timelineFilters.categories.length > 0) ||
+      timelineFilters.onlyErrors ||
+      timelineFilters.hasVideo ||
+      timelineFilters.hasDetails
+    )
+    if (q.length < 2 && !hasMeaningfulFilters) return
+
+    const reqKey = timelineSearchReqKeyRef.current
+    if (!reqKey) return
+
+    setTimelineSearchLoading(true)
+    setTimelineSearchError(null)
+    try {
+      const scope = getTimelineSearchScope(timelineSearchScopePreset, dayKeyRef.current)
+      const limit = 200
+      const req: TimelineSearchRequestDTO = {
+        query: q,
+        scope,
+        filters: timelineFilters,
+        limit,
+        offset: timelineSearchOffset
+      }
+      const res = await window.chrona.searchTimeline(req)
+      if (timelineSearchReqKeyRef.current !== reqKey) return
+
+      setTimelineSearchHits((prev) => [...prev, ...res.hits])
+      setTimelineSearchHasMore(res.hasMore)
+      setTimelineSearchOffset(res.offset + res.limit)
+    } catch (e) {
+      setTimelineSearchError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setTimelineSearchLoading(false)
+    }
   }
 
   async function onSaveInterval() {
@@ -612,6 +796,20 @@ export function App() {
 
   const timelineMetrics = useMemo(() => getTimelineMetrics(timelinePxPerHour), [timelinePxPerHour])
 
+  const visibleDayCards = useMemo(() => {
+    if (timelineSearchScopePreset !== 'day') return cards
+    return applyTimelineClientFilters(cards, timelineSearchQuery, timelineFilters)
+  }, [cards, timelineSearchQuery, timelineFilters, timelineSearchScopePreset])
+
+  useEffect(() => {
+    if (view !== 'timeline') return
+    if (timelineSearchScopePreset !== 'day') return
+    if (selectedCardId === null) return
+    if (!visibleDayCards.some((c) => c.id === selectedCardId)) {
+      setSelectedCardId(null)
+    }
+  }, [view, timelineSearchScopePreset, visibleDayCards, selectedCardId])
+
   const applyZoom = useCallback(
     (nextPxPerHourRaw: number, opts?: { anchorY?: number }) => {
       const nextPxPerHour = clampTimelinePxPerHour(nextPxPerHourRaw)
@@ -861,37 +1059,242 @@ export function App() {
           </section>
         ) : view === 'timeline' ? (
           <section className="timeline">
+            <div className="timelineControls">
+              <div className="timelineControlsRow">
+                <div className="field" style={{ minWidth: 260, flex: 1 }}>
+                  <div className="label">Search</div>
+                  <input
+                    ref={timelineSearchInputRef}
+                    className="input"
+                    placeholder="Search timeline…"
+                    value={timelineSearchQuery}
+                    onChange={(e) => setTimelineSearchQuery(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Escape') {
+                        e.preventDefault()
+                        setTimelineSearchQuery('')
+                        ;(e.currentTarget as any).blur?.()
+                      }
+                    }}
+                  />
+                </div>
+
+                <div className="field" style={{ minWidth: 180 }}>
+                  <div className="label">Scope</div>
+                  <select
+                    className="input"
+                    value={timelineSearchScopePreset}
+                    onChange={(e) => setTimelineSearchScopePreset(e.target.value as any)}
+                  >
+                    <option value="day">Selected day</option>
+                    <option value="today">Today</option>
+                    <option value="yesterday">Yesterday</option>
+                    <option value="last7">Last 7 days</option>
+                    <option value="last30">Last 30 days</option>
+                    <option value="all">All time</option>
+                  </select>
+                </div>
+
+                <div className="row" style={{ alignSelf: 'end' }}>
+                  <button
+                    className="btn"
+                    onClick={() => {
+                      setTimelineSearchQuery('')
+                      setTimelineFilters({
+                        includeSystem: true,
+                        onlyErrors: false,
+                        hasVideo: false,
+                        hasDetails: false,
+                        categories: []
+                      })
+                    }}
+                  >
+                    Clear
+                  </button>
+                </div>
+              </div>
+
+              <div className="timelineControlsRow">
+                <div className="row" style={{ flexWrap: 'wrap' }}>
+                  <label className="pill">
+                    <input
+                      type="checkbox"
+                      checked={!!timelineFilters.includeSystem}
+                      disabled={!!timelineFilters.onlyErrors}
+                      onChange={(e) =>
+                        setTimelineFilters((prev) => ({
+                          ...prev,
+                          includeSystem: e.target.checked
+                        }))
+                      }
+                    />
+                    Include System
+                  </label>
+                  <label className="pill">
+                    <input
+                      type="checkbox"
+                      checked={!!timelineFilters.onlyErrors}
+                      onChange={(e) =>
+                        setTimelineFilters((prev) => ({
+                          ...prev,
+                          onlyErrors: e.target.checked,
+                          includeSystem: e.target.checked ? true : prev.includeSystem
+                        }))
+                      }
+                    />
+                    Only errors
+                  </label>
+                  <label className="pill">
+                    <input
+                      type="checkbox"
+                      checked={!!timelineFilters.hasVideo}
+                      onChange={(e) =>
+                        setTimelineFilters((prev) => ({
+                          ...prev,
+                          hasVideo: e.target.checked
+                        }))
+                      }
+                    />
+                    Has video
+                  </label>
+                  <label className="pill">
+                    <input
+                      type="checkbox"
+                      checked={!!timelineFilters.hasDetails}
+                      onChange={(e) =>
+                        setTimelineFilters((prev) => ({
+                          ...prev,
+                          hasDetails: e.target.checked
+                        }))
+                      }
+                    />
+                    Has details
+                  </label>
+                </div>
+              </div>
+
+              <div className="timelineControlsRow">
+                <div className="row" style={{ flexWrap: 'wrap' }}>
+                  {['Work', 'Personal', 'Distraction', 'Idle', 'System'].map((cat) => {
+                    const active = (timelineFilters.categories ?? []).includes(cat)
+                    return (
+                      <button
+                        key={cat}
+                        className={`chip ${active ? 'chip-active' : ''}`}
+                        onClick={() => {
+                          setTimelineFilters((prev) => {
+                            const cur = new Set(prev.categories ?? [])
+                            if (cur.has(cat)) cur.delete(cat)
+                            else cur.add(cat)
+                            const nextCats = [...cur]
+                            const includeSystem =
+                              prev.onlyErrors || prev.includeSystem || nextCats.includes('System')
+                            return {
+                              ...prev,
+                              includeSystem,
+                              categories: nextCats
+                            }
+                          })
+                        }}
+                        type="button"
+                      >
+                        {cat}
+                      </button>
+                    )
+                  })}
+                </div>
+              </div>
+
+              {timelineSearchScopePreset !== 'day' ? (
+                <div className="timelineControlsMeta">
+                  {timelineSearchLoading
+                    ? 'Searching…'
+                    : timelineSearchError
+                      ? `Search error: ${timelineSearchError}`
+                      : `${timelineSearchHits.length} result${timelineSearchHits.length === 1 ? '' : 's'}`}
+                </div>
+              ) : timelineSearchQuery.trim() || (timelineFilters.categories ?? []).length > 0 || timelineFilters.hasVideo || timelineFilters.hasDetails || timelineFilters.onlyErrors ? (
+                <div className="timelineControlsMeta">
+                  Showing {visibleDayCards.length} card{visibleDayCards.length === 1 ? '' : 's'}
+                </div>
+              ) : null}
+            </div>
+
             <div className="timelineScroll" ref={timelineScrollRef}>
-              <div className="timelineGrid" style={{ height: `${timelineMetrics.gridHeightPx}px` }}>
-                {renderTimeTicks(windowInfo.startTs, timelinePxPerHour)}
-                {nowYpx !== null ? <div className="nowLine" style={{ top: `${nowYpx}px` }} /> : null}
+              {timelineSearchScopePreset !== 'day' ? (
+                <div className="searchResults">
+                  {timelineSearchError ? <div className="mono error">{timelineSearchError}</div> : null}
 
-                {cards.map((c) => {
-                  const layout = cardLayout(c, windowInfo.startTs, windowInfo.endTs, timelineMetrics)
-                  return (
-                    <div
-                      key={c.id}
-                      className={`card ${layout.sizeClass} ${selectedCardId === c.id ? 'selected' : ''} ${c.category === 'System' ? 'system' : ''}`}
-                      style={layout.style}
-                      onClick={() => setSelectedCardId(c.id)}
-                      role="button"
-                      tabIndex={0}
-                    >
-                      <div className="cardTitle">{c.title}</div>
-                      <div className="cardMeta">
-                        {formatClockAscii(c.startTs)} - {formatClockAscii(c.endTs)} · {c.category}
-                      </div>
-
-                      <div className="cardHover" aria-hidden="true">
-                        <div className="cardHoverTitle">{c.title}</div>
-                        <div className="cardHoverMeta">
-                          {formatClockAscii(c.startTs)} - {formatClockAscii(c.endTs)} · {c.category}
-                        </div>
+                  {!timelineSearchLoading && timelineSearchHits.length === 0 && !timelineSearchError ? (
+                    <div className="reviewEmpty">
+                      <div className="sideTitle">No results</div>
+                      <div className="sideMeta">
+                        Type at least 2 characters, or use filters (errors/video/details/categories).
                       </div>
                     </div>
-                  )
-                })}
-              </div>
+                  ) : null}
+
+                  {timelineSearchHits.map((h) => {
+                    const c = h.card
+                    return (
+                      <button
+                        key={`${c.dayKey}:${c.id}`}
+                        className="searchHit"
+                        onClick={() => jumpToTimelineCard(c)}
+                      >
+                        <div className="searchHitTop">
+                          <div className="searchHitTitle">{c.title}</div>
+                          <div className="searchHitMeta">
+                            {c.dayKey} · {formatClockAscii(c.startTs)} - {formatClockAscii(c.endTs)} · {c.category}
+                          </div>
+                        </div>
+                        {h.snippet || c.summary ? (
+                          <div className="searchHitSnippet">{h.snippet ?? c.summary}</div>
+                        ) : null}
+                      </button>
+                    )
+                  })}
+
+                  {timelineSearchHasMore && !timelineSearchLoading ? (
+                    <div className="row" style={{ padding: '12px 16px' }}>
+                      <button className="btn" onClick={() => void loadMoreTimelineSearch()}>
+                        Load more
+                      </button>
+                    </div>
+                  ) : null}
+                </div>
+              ) : (
+                <div className="timelineGrid" style={{ height: `${timelineMetrics.gridHeightPx}px` }}>
+                  {renderTimeTicks(windowInfo.startTs, timelinePxPerHour)}
+                  {nowYpx !== null ? <div className="nowLine" style={{ top: `${nowYpx}px` }} /> : null}
+
+                  {visibleDayCards.map((c) => {
+                    const layout = cardLayout(c, windowInfo.startTs, windowInfo.endTs, timelineMetrics)
+                    return (
+                      <div
+                        key={c.id}
+                        className={`card ${layout.sizeClass} ${selectedCardId === c.id ? 'selected' : ''} ${c.category === 'System' ? 'system' : ''}`}
+                        style={layout.style}
+                        onClick={() => setSelectedCardId(c.id)}
+                        role="button"
+                        tabIndex={0}
+                      >
+                        <div className="cardTitle">{c.title}</div>
+                        <div className="cardMeta">
+                          {formatClockAscii(c.startTs)} - {formatClockAscii(c.endTs)} · {c.category}
+                        </div>
+
+                        <div className="cardHover" aria-hidden="true">
+                          <div className="cardHoverTitle">{c.title}</div>
+                          <div className="cardHoverMeta">
+                            {formatClockAscii(c.startTs)} - {formatClockAscii(c.endTs)} · {c.category}
+                          </div>
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
             </div>
           </section>
         ) : view === 'review' ? (
@@ -1631,6 +2034,37 @@ function addDaysToDayKey(dayKey: string, deltaDays: number): string {
   return dayKeyFromUnixSeconds(Math.floor(base.getTime() / 1000) + 4 * 60 * 60)
 }
 
+function getTimelineSearchScope(
+  preset: 'day' | 'today' | 'yesterday' | 'last7' | 'last30' | 'all',
+  selectedDayKey: string
+): { startTs: number; endTs: number } {
+  const nowDayKey = dayKeyFromUnixSeconds(Math.floor(Date.now() / 1000))
+
+  if (preset === 'today') return dayWindowForDayKey(nowDayKey)
+  if (preset === 'yesterday') return dayWindowForDayKey(addDaysToDayKey(nowDayKey, -1))
+
+  if (preset === 'last7') {
+    const endTs = dayWindowForDayKey(nowDayKey).endTs
+    const startKey = addDaysToDayKey(nowDayKey, -6)
+    const startTs = dayWindowForDayKey(startKey).startTs
+    return { startTs, endTs }
+  }
+
+  if (preset === 'last30') {
+    const endTs = dayWindowForDayKey(nowDayKey).endTs
+    const startKey = addDaysToDayKey(nowDayKey, -29)
+    const startTs = dayWindowForDayKey(startKey).startTs
+    return { startTs, endTs }
+  }
+
+  if (preset === 'all') {
+    const endTs = dayWindowForDayKey(nowDayKey).endTs
+    return { startTs: 0, endTs }
+  }
+
+  return dayWindowForDayKey(selectedDayKey)
+}
+
 function formatCaptureStatus(state: {
   desiredRecordingEnabled: boolean
   isSystemPaused: boolean
@@ -1721,6 +2155,89 @@ function resolveOverlapsForDisplay(cards: TimelineCardDTO[]): TimelineCardDTO[] 
   return [...cards]
     .filter((c) => c.endTs > c.startTs)
     .sort((a, b) => a.startTs - b.startTs)
+}
+
+function applyTimelineClientFilters(
+  cards: TimelineCardDTO[],
+  queryRaw: string,
+  filters: TimelineSearchFiltersDTO
+): TimelineCardDTO[] {
+  const q = String(queryRaw ?? '').trim().toLowerCase()
+  const tokens = q ? q.split(/\s+/g).filter(Boolean) : []
+
+  const includeSystem = filters.includeSystem ?? true
+  const onlyErrors = !!filters.onlyErrors
+  const hasVideo = !!filters.hasVideo
+  const hasDetails = !!filters.hasDetails
+  const categories = Array.isArray(filters.categories) ? filters.categories : []
+  const catSet = new Set(categories)
+
+  const out: TimelineCardDTO[] = []
+  for (const c of cards) {
+    if (onlyErrors) {
+      if (c.category !== 'System') continue
+      if (!(c.subcategory === 'Error' || c.title === 'Processing failed')) continue
+    } else {
+      if (!includeSystem && c.category === 'System') continue
+      if (catSet.size > 0 && !catSet.has(c.category)) continue
+    }
+
+    if (hasVideo) {
+      const v = String(c.videoSummaryUrl ?? '').trim()
+      if (!v) continue
+    }
+
+    if (hasDetails) {
+      const d = String(c.detailedSummary ?? '').trim()
+      if (!d) continue
+    }
+
+    if (tokens.length > 0) {
+      const hay = buildCardSearchHaystack(c)
+      let ok = true
+      for (const t of tokens) {
+        if (!hay.includes(t)) {
+          ok = false
+          break
+        }
+      }
+      if (!ok) continue
+    }
+
+    out.push(c)
+  }
+
+  out.sort((a, b) => a.startTs - b.startTs)
+  return out
+}
+
+function buildCardSearchHaystack(c: TimelineCardDTO): string {
+  const parts: string[] = []
+  parts.push(String(c.title ?? ''))
+  parts.push(String(c.summary ?? ''))
+  parts.push(String(c.detailedSummary ?? ''))
+  parts.push(String(c.category ?? ''))
+  parts.push(String(c.subcategory ?? ''))
+
+  const meta = parseCardMetadata(c.metadata)
+  if (meta?.appSites?.primary) parts.push(String(meta.appSites.primary))
+  if (meta?.appSites?.secondary) parts.push(String(meta.appSites.secondary))
+
+  return parts
+    .join(' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLowerCase()
+}
+
+function parseCardMetadata(metadata: string | null): any {
+  const s = String(metadata ?? '').trim()
+  if (!s) return null
+  try {
+    return JSON.parse(s)
+  } catch {
+    return null
+  }
 }
 
 function renderTimeTicks(windowStartTs: number, pxPerHourRaw: number) {
