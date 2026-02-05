@@ -226,6 +226,81 @@ textarea {
   border-radius: 14px;
 }
 
+.timelineControls {
+  padding: 14px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.10);
+  background: rgba(0, 0, 0, 0.10);
+  border-top-left-radius: 14px;
+  border-top-right-radius: 14px;
+}
+
+.timelineControlsRow {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  margin-bottom: 10px;
+}
+
+.timelineControlsRow:last-child {
+  margin-bottom: 0;
+}
+
+.timelineControlsMeta {
+  margin-top: 8px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.chip.chip-active {
+  border-color: rgba(59, 212, 178, 0.55);
+  background: rgba(59, 212, 178, 0.12);
+}
+
+.searchResults {
+  padding: 14px;
+  display: grid;
+  gap: 10px;
+}
+
+.searchHit {
+  width: 100%;
+  text-align: left;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(0, 0, 0, 0.14);
+  color: var(--text);
+  border-radius: 14px;
+  padding: 12px 12px;
+  cursor: pointer;
+}
+
+.searchHit:hover {
+  border-color: rgba(255, 255, 255, 0.18);
+  background: rgba(0, 0, 0, 0.18);
+}
+
+.searchHitTop {
+  display: grid;
+  gap: 4px;
+}
+
+.searchHitTitle {
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+
+.searchHitMeta {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.searchHitSnippet {
+  margin-top: 8px;
+  color: rgba(255, 255, 255, 0.82);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
 .timelineGrid {
   position: relative;
   height: 2400px;
