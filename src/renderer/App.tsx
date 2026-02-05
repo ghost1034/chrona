@@ -4,8 +4,10 @@ import { dayKeyFromUnixSeconds, dayWindowForDayKey, formatClockAscii } from '../
 import { formatBytes } from '../shared/format'
 import type { AskSourceRef } from '../shared/ask'
 import type { JournalDraftDTO, JournalEntryDTO, JournalEntryPatch } from '../shared/journal'
+import type { SetupStatus } from '../shared/ipc'
 import { DashboardView } from './DashboardView'
 import { SettingsView } from './SettingsView'
+import { OnboardingView } from './OnboardingView'
 
 type DisplayInfo = { id: string; bounds: { width: number; height: number }; scaleFactor: number }
 
@@ -35,6 +37,8 @@ export function App() {
   const [analysisLine, setAnalysisLine] = useState<string>('')
 
   const [hasGeminiKey, setHasGeminiKey] = useState<boolean | null>(null)
+  const [setupStatus, setSetupStatus] = useState<SetupStatus | null>(null)
+  const [onboardingCompleted, setOnboardingCompleted] = useState<boolean>(true)
   const [geminiKeyInput, setGeminiKeyInput] = useState<string>('')
   const [timelapsesEnabled, setTimelapsesEnabled] = useState<boolean>(false)
   const [autoStartEnabled, setAutoStartEnabled] = useState<boolean>(false)
@@ -63,7 +67,9 @@ export function App() {
   const [dayKey, setDayKey] = useState<string>(() => dayKeyFromUnixSeconds(Math.floor(Date.now() / 1000)))
   const [cards, setCards] = useState<TimelineCardDTO[]>([])
   const [selectedCardId, setSelectedCardId] = useState<number | null>(null)
-  const [view, setView] = useState<'timeline' | 'review' | 'ask' | 'dashboard' | 'journal' | 'settings'>(
+  const [view, setView] = useState<
+    'timeline' | 'review' | 'ask' | 'dashboard' | 'journal' | 'settings' | 'onboarding'
+  >(
     'timeline'
   )
   const [reviewCoverage, setReviewCoverage] = useState<Record<number, number>>({})
@@ -104,6 +110,16 @@ export function App() {
     viewRef.current = view
   }, [view])
 
+  const refreshSetupStatus = useCallback(async () => {
+    try {
+      const st = await window.chrona.getSetupStatus()
+      setSetupStatus(st)
+      setHasGeminiKey(st.hasGeminiKey)
+    } catch {
+      // ignore
+    }
+  }, [])
+
   const [journalEntry, setJournalEntry] = useState<JournalEntryDTO | null>(null)
   const [journalLoading, setJournalLoading] = useState<boolean>(false)
   const [journalSaveLine, setJournalSaveLine] = useState<string>('')
@@ -137,7 +153,7 @@ export function App() {
       setStatusLine(formatCaptureStatus(state))
 
       setDisplays(await window.chrona.listDisplays())
-      setHasGeminiKey((await window.chrona.hasGeminiApiKey()).hasApiKey)
+      await refreshSetupStatus()
 
       const settings = await window.chrona.getSettings()
       setTimelapsesEnabled(!!settings.timelapsesEnabled)
@@ -156,6 +172,11 @@ export function App() {
       setPromptPreambleAsk(String((settings as any).promptPreambleAsk ?? ''))
       setPromptPreambleJournalDraft(String((settings as any).promptPreambleJournalDraft ?? ''))
       setAutoStartEnabled((await window.chrona.getAutoStartEnabled()).enabled)
+
+      setOnboardingCompleted(!!(settings as any).onboardingCompleted)
+      if (!(settings as any).onboardingCompleted) {
+        setView('onboarding')
+      }
 
       const usage = await window.chrona.getStorageUsage()
       setStorageUsage(usage)
@@ -187,6 +208,7 @@ export function App() {
     const unsubNav = window.chrona.onNavigate((p) => {
       const v = String((p as any)?.view ?? '')
       if (v === 'settings') setView('settings')
+      if (v === 'onboarding') setView('onboarding')
     })
 
     return () => {
@@ -351,7 +373,7 @@ export function App() {
     if (!geminiKeyInput.trim()) return
     await window.chrona.setGeminiApiKey(geminiKeyInput)
     setGeminiKeyInput('')
-    setHasGeminiKey((await window.chrona.hasGeminiApiKey()).hasApiKey)
+    await refreshSetupStatus()
   }
 
   async function onSaveStorageLimits() {
@@ -419,10 +441,35 @@ export function App() {
   }
 
   async function onToggleRecording() {
-    const next = await window.chrona.setRecordingEnabled(!recording)
-    setRecording(next.desiredRecordingEnabled)
-    setSystemPaused(next.isSystemPaused)
-    setStatusLine(formatCaptureStatus(next))
+    try {
+      const next = await window.chrona.setRecordingEnabled(!recording)
+      setRecording(next.desiredRecordingEnabled)
+      setSystemPaused(next.isSystemPaused)
+      setStatusLine(formatCaptureStatus(next))
+      await refreshSetupStatus()
+    } catch (e) {
+      setLastError(e instanceof Error ? e.message : String(e))
+      await refreshSetupStatus()
+    }
+  }
+
+  async function onStartRecording() {
+    if (recording) return
+    try {
+      const next = await window.chrona.setRecordingEnabled(true)
+      setRecording(next.desiredRecordingEnabled)
+      setSystemPaused(next.isSystemPaused)
+      setStatusLine(formatCaptureStatus(next))
+      await refreshSetupStatus()
+    } catch (e) {
+      setLastError(e instanceof Error ? e.message : String(e))
+      await refreshSetupStatus()
+    }
+  }
+
+  async function markOnboardingComplete() {
+    await window.chrona.updateSettings({ onboardingCompleted: true, onboardingVersion: 1 } as any)
+    setOnboardingCompleted(true)
   }
 
   async function onCopyDay() {
@@ -678,20 +725,28 @@ export function App() {
       <header className="header">
         <div className="brand">
           <div className="wordmark">Chrona</div>
-           <div className="tagline">
-             {view === 'ask'
-               ? 'Ask Chrona'
-               : view === 'review'
-                 ? 'Review'
-                 : view === 'dashboard'
-                   ? 'Dashboard'
-                    : view === 'journal'
-                      ? `Journal · ${dayKey}`
-                      : `Timeline · ${dayKey}`}
-           </div>
-         </div>
+            <div className="tagline">
+              {view === 'onboarding'
+                ? 'Setup'
+                : view === 'ask'
+                  ? 'Ask Chrona'
+                  : view === 'review'
+                    ? 'Review'
+                    : view === 'dashboard'
+                      ? 'Dashboard'
+                      : view === 'journal'
+                        ? `Journal · ${dayKey}`
+                        : `Timeline · ${dayKey}`}
+            </div>
+          </div>
 
         <div className="toolbar">
+          <button
+            className={`btn ${view === 'onboarding' ? 'btn-accent' : ''}`}
+            onClick={() => setView('onboarding')}
+          >
+            Setup
+          </button>
           <button
             className={`btn ${view === 'timeline' ? 'btn-accent' : ''}`}
             onClick={() => setView('timeline')}
@@ -764,8 +819,47 @@ export function App() {
         </div>
       </header>
 
+      {setupStatus?.platform === 'darwin' && setupStatus.captureAccess.status === 'denied' ? (
+        <div className="setupBanner">
+          <div className="setupBannerLeft">
+            <div className="setupBannerTitle">Screen capture permission required</div>
+            <div className="setupBannerMeta">
+              macOS Screen Recording permission is missing. Recording is disabled until you enable it.
+            </div>
+          </div>
+          <button className="btn btn-accent" onClick={() => setView('onboarding')}>
+            Finish setup
+          </button>
+        </div>
+      ) : null}
+
+      {setupStatus && !setupStatus.hasGeminiKey ? (
+        <div className="setupBanner">
+          <div className="setupBannerLeft">
+            <div className="setupBannerTitle">Gemini API key missing</div>
+            <div className="setupBannerMeta">Recording works, but analysis will stay pending until a key is configured.</div>
+          </div>
+          <button className="btn" onClick={() => setView('onboarding')}>
+            Add key
+          </button>
+        </div>
+      ) : null}
+
       <main className="layout">
-        {view === 'timeline' ? (
+        {view === 'onboarding' ? (
+          <section className="timeline">
+            <div className="timelineScroll">
+              <OnboardingView
+                setupStatus={setupStatus}
+                onboardingCompleted={onboardingCompleted}
+                onRefreshSetupStatus={refreshSetupStatus}
+                onMarkCompleted={markOnboardingComplete}
+                onStartRecording={onStartRecording}
+                onGoToTimeline={() => setView('timeline')}
+              />
+            </div>
+          </section>
+        ) : view === 'timeline' ? (
           <section className="timeline">
             <div className="timelineScroll" ref={timelineScrollRef}>
               <div className="timelineGrid" style={{ height: `${timelineMetrics.gridHeightPx}px` }}>
@@ -990,6 +1084,7 @@ export function App() {
                 recording={recording}
                 systemPaused={systemPaused}
                 lastError={lastError}
+                onToggleRecording={onToggleRecording}
                 interval={interval}
                 setInterval={setInterval}
                 onSaveInterval={onSaveInterval}
@@ -1053,7 +1148,26 @@ export function App() {
         )}
 
         <aside className="side">
-          {view === 'ask' ? (
+          {view === 'onboarding' ? (
+            <div className="sidePanel">
+              <div className="sideTitle">Setup status</div>
+              <div className="sideMeta">
+                Gemini key: {setupStatus ? (setupStatus.hasGeminiKey ? 'configured' : 'missing') : '...'}
+                {setupStatus?.platform === 'darwin'
+                  ? ` · Capture: ${setupStatus.captureAccess.status === 'granted' ? 'granted' : 'missing'}`
+                  : ''}
+              </div>
+
+              <div className="row">
+                <button className="btn" onClick={() => void refreshSetupStatus()}>
+                  Refresh
+                </button>
+                <button className="btn" onClick={() => setView('timeline')}>
+                  Go to Timeline
+                </button>
+              </div>
+            </div>
+          ) : view === 'ask' ? (
             <div className="sidePanel">
               <div className="sideTitle">Ask settings</div>
               <div className="sideMeta">
