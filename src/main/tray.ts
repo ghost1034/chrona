@@ -6,6 +6,7 @@ export function createTray(opts: {
   onToggleRecording: (enabled: boolean) => void
   onOpenRecordingsFolder: () => void
   onOpenSettings: () => void
+  onOpenSetup: () => void
   onOpen: () => void
   onQuit: () => void
 }): { tray: Tray; updateMenu: () => void } {
@@ -30,6 +31,7 @@ function buildTemplate(
     onToggleRecording: (enabled: boolean) => void
     onOpenRecordingsFolder: () => void
     onOpenSettings: () => void
+    onOpenSetup: () => void
     onOpen: () => void
     onQuit: () => void
   }
@@ -42,6 +44,11 @@ function buildTemplate(
       : 'Status: Idle'
 
   return [
+    {
+      label: 'Setup…',
+      click: () => opts.onOpenSetup()
+    },
+    { type: 'separator' },
     {
       label: recordingLabel,
       click: () => opts.onToggleRecording(!state.desiredRecordingEnabled)

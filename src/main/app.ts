@@ -222,6 +222,11 @@ async function main() {
       win.focus()
       win.webContents.send(IPC_EVENTS.navigate, { view: 'settings' })
     },
+    onOpenSetup: () => {
+      win.show()
+      win.focus()
+      win.webContents.send(IPC_EVENTS.navigate, { view: 'onboarding' })
+    },
     onOpen: () => {
       win.show()
       win.focus()
