@@ -141,6 +141,84 @@ textarea {
   box-shadow: 0 18px 60px var(--shadow);
 }
 
+.setupBanner {
+  margin: 0 0 16px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: linear-gradient(180deg, rgba(255, 122, 24, 0.14), rgba(0, 0, 0, 0.12));
+  border-radius: 14px;
+  padding: 12px 14px;
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.setupBannerLeft {
+  min-width: 0;
+}
+
+.setupBannerTitle {
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+
+.setupBannerMeta {
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.onboardingWrap {
+  padding: 20px;
+}
+
+.onboardingCard {
+  border: 1px solid var(--stroke);
+  background: linear-gradient(180deg, var(--card), var(--card2));
+  border-radius: 14px;
+  box-shadow: 0 18px 60px var(--shadow);
+  overflow: hidden;
+  max-width: 860px;
+}
+
+.onboardingHeader {
+  padding: 14px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.10);
+}
+
+.onboardingBody {
+  padding: 14px;
+}
+
+.onboardingLead {
+  font-size: 14px;
+  color: var(--text);
+  line-height: 1.45;
+}
+
+.onboardingList {
+  margin-top: 12px;
+  display: grid;
+  gap: 10px;
+}
+
+.onboardingFooter {
+  padding: 12px 14px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  border-top: 1px solid rgba(255, 255, 255, 0.10);
+  background: rgba(0, 0, 0, 0.10);
+}
+
+.onboardingFooterRight {
+  display: flex;
+  gap: 10px;
+}
+
 .timelineScroll {
   height: calc(100vh - 180px);
   min-height: 500px;
