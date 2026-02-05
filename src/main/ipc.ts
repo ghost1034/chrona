@@ -12,7 +12,7 @@ import { dayKeyFromUnixSeconds } from '../shared/time'
 import { dayWindowForDayKey } from '../shared/time'
 import { coverageByCardId } from '../shared/review'
 import type { RetentionService } from './retention/retention'
-import { toDayflowMediaUrl } from './mediaProtocol'
+import { toChronaMediaUrl } from './mediaProtocol'
 import { applyAutoStart } from './autostart'
 import type { Logger } from './logger'
 
@@ -109,7 +109,7 @@ export function registerIpc(opts: {
       days
     })
 
-    const defaultName = `dayflow-${req.startDayKey}_to_${req.endDayKey}.md`
+    const defaultName = `chrona-${req.startDayKey}_to_${req.endDayKey}.md`
     const res = await dialog.showSaveDialog({
       title: 'Export timeline as Markdown',
       defaultPath: defaultName,
@@ -170,7 +170,7 @@ export function registerIpc(opts: {
     }
     // Avoid returning file:// URLs to the renderer. Chromium blocks http(s) -> file:// loads
     // (common during dev when using Vite), which breaks <video> playback.
-    return { fileUrl: toDayflowMediaUrl(rel) }
+    return { fileUrl: toChronaMediaUrl(rel) }
   })
 }
 

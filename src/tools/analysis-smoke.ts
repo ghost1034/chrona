@@ -9,11 +9,11 @@ import { TimelapseService } from '../main/timelapse/timelapse'
 
 async function main() {
   const baseDir =
-    process.env.DAYFLOW_SMOKE_DIR ?? path.join(os.tmpdir(), `dayflow-analysis-smoke-${process.pid}`)
+    process.env.CHRONA_SMOKE_DIR ?? path.join(os.tmpdir(), `chrona-analysis-smoke-${process.pid}`)
 
   const log = createLogger({ userDataPath: baseDir })
   const settings = new SettingsStore({ userDataPath: baseDir })
-  if (process.env.DAYFLOW_SMOKE_TIMELAPSE) {
+  if (process.env.CHRONA_SMOKE_TIMELAPSE) {
     await settings.update({ timelapsesEnabled: true })
   }
   const storage = new StorageService({ userDataPath: baseDir })
@@ -67,7 +67,7 @@ async function main() {
   const firstBatch = recent[recent.length - 1]
   const cards = firstBatch ? await storage.fetchCardsForDay(dayKeyFromUnixSeconds(firstBatch.batchStartTs)) : []
 
-  if (process.env.DAYFLOW_SMOKE_TIMELAPSE) {
+  if (process.env.CHRONA_SMOKE_TIMELAPSE) {
     await timelapse.waitForIdle()
   }
 

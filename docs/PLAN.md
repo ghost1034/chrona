@@ -1,6 +1,6 @@
-# Dayflow Cross-Platform Build Plan
+# Chrona Cross-Platform Build Plan
 
-This plan translates the *behavioral contract* of the original macOS Dayflow app (`docs/ORIGINAL.md`) into the cross‑platform Electron reimplementation described in `docs/NEW.md`.
+This plan translates the *behavioral contract* of the original macOS Chrona app (`docs/ORIGINAL.md`) into the cross‑platform Electron reimplementation described in `docs/NEW.md`.
 
 **Hard constraints (must-haves):**
 - Electron desktop app
@@ -66,7 +66,7 @@ This plan translates the *behavioral contract* of the original macOS Dayflow app
 **Work items**
 - Implement DB open with pragmas (WAL, synchronous=NORMAL, busy_timeout, foreign_keys=ON).
 - Implement filesystem layout:
-  - `db/dayflow.sqlite`
+  - `db/chrona.sqlite`
   - `recordings/screenshots/YYYY-MM-DD/<timestamp>.jpg`
   - `timelapses/YYYY-MM-DD/<cardId>.mp4` (reserved for later)
 - Implement core queries needed for later phases:
@@ -297,7 +297,7 @@ This plan translates the *behavioral contract* of the original macOS Dayflow app
 **Goal:** make the app feel native enough on each platform and preserve automation hooks.
 
 **Deliverables**
-- Protocol handler: `dayflow://start-recording`, `dayflow://stop-recording` (+ optional pause/resume).
+- Protocol handler: `chrona://start-recording`, `chrona://stop-recording` (+ optional pause/resume).
 - Auto-start option (platform-specific) with clear UX.
 - “Open recordings folder” implemented cross-platform.
 

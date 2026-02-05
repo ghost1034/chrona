@@ -1,6 +1,6 @@
-# Dayflow Cross-Platform Decisions
+# Chrona Cross-Platform Decisions
 
-This file records project-level decisions for the cross-platform Dayflow reimplementation described in `docs/NEW.md` and planned in `docs/PLAN.md`.
+This file records project-level decisions for the cross-platform Chrona reimplementation described in `docs/NEW.md` and planned in `docs/PLAN.md`.
 
 Format:
 - Each decision has an ID so we can reference it in PRs and discussions.

@@ -15,7 +15,7 @@ export async function buildCompressedTimelineVideo(opts: {
   const ffmpeg = opts.ffmpegPath ?? (await resolveFfmpegPath())
   const targetHeight = opts.targetHeight ?? 540
 
-  const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'dayflow-ffmpeg-'))
+  const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'chrona-ffmpeg-'))
   const listPath = path.join(tmpDir, 'inputs.txt')
 
   try {

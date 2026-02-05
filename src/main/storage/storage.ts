@@ -75,7 +75,7 @@ export class StorageService {
     await fs.mkdir(this.absPath('recordings', 'screenshots'), { recursive: true })
     await fs.mkdir(this.absPath('timelapses'), { recursive: true })
 
-    const dbPath = this.absPath('db', 'dayflow.sqlite')
+    const dbPath = this.absPath('db', 'chrona.sqlite')
     const db = new Database(dbPath)
     this.db = db
 

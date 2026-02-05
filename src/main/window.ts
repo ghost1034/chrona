@@ -25,7 +25,7 @@ export async function createMainWindow(): Promise<BrowserWindow> {
 }
 
 async function loadRenderer(win: BrowserWindow) {
-  const devUrl = process.env.DAYFLOW_DEV_SERVER_URL
+  const devUrl = process.env.CHRONA_DEV_SERVER_URL
   if (devUrl) {
     await win.loadURL(devUrl)
     win.webContents.openDevTools({ mode: 'detach' })

@@ -53,7 +53,7 @@ jobs:
       - name: Upload packaged artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: dayflow-${{ matrix.target }}
+          name: chrona-${{ matrix.target }}
           path: ${{ matrix.artifact_paths }}
           if-no-files-found: error
 

@@ -1,13 +1,13 @@
 {
-  "name": "dayflow",
+  "name": "chrona",
   "description": "Records your screen and generates a timeline of your activities.",
   "private": true,
   "version": "0.0.0",
-  "author": "Dayflow",
+  "author": "Chrona",
   "type": "module",
   "main": "dist/main/app.cjs",
   "scripts": {
-    "dev": "concurrently -k -n VITE,TSUP,ELECTRON \"vite\" \"tsup --watch\" \"wait-on tcp:5173 && cross-env DAYFLOW_DEV_SERVER_URL=http://localhost:5173 nodemon --watch dist/main --exec electron .\"",
+    "dev": "concurrently -k -n VITE,TSUP,ELECTRON \"vite\" \"tsup --watch\" \"wait-on tcp:5173 && cross-env CHRONA_DEV_SERVER_URL=http://localhost:5173 nodemon --watch dist/main --exec electron .\"",
     "build:main": "tsup",
     "build:renderer": "vite build",
     "build": "npm run build:main && npm run build:renderer",
@@ -49,8 +49,8 @@
     "wait-on": "^8.0.2"
   },
   "build": {
-    "appId": "com.dayflow.app",
-    "productName": "Dayflow",
+    "appId": "com.chrona.app",
+    "productName": "Chrona",
     "directories": {
       "output": "release"
     },
@@ -72,8 +72,8 @@
     },
     "protocols": [
       {
-        "name": "Dayflow",
-        "schemes": ["dayflow"]
+        "name": "Chrona",
+        "schemes": ["chrona"]
       }
     ]
   },

@@ -1,6 +1,6 @@
 # QA Checklist
 
-Manual regression checklist for Dayflow cross-platform.
+Manual regression checklist for Chrona cross-platform.
 
 ## Install + launch
 

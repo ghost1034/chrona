@@ -1,10 +1,10 @@
 /// <reference types="vite/client" />
 
-import type { DayflowApi } from '../main/preload'
+import type { ChronaApi } from '../main/preload'
 
 declare global {
   interface Window {
-    dayflow: DayflowApi
+    chrona: ChronaApi
   }
 }
 

@@ -17,7 +17,7 @@ export async function buildTimelapseFromJpegs(opts: {
   const targetHeight = opts.targetHeight ?? 720
 
   const ffmpeg = opts.ffmpegPath ?? (await resolveFfmpegPath())
-  const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'dayflow-timelapse-'))
+  const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'chrona-timelapse-'))
   const listPath = path.join(tmpDir, 'inputs.txt')
 
   try {

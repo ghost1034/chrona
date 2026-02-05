@@ -1,6 +1,6 @@
-# Dayflow Cross-Platform Description
+# Chrona Cross-Platform Description
 
-This document describes a clean, cross‑platform reimplementation of Dayflow that preserves the *behavioral* outputs of the current macOS app (screen → observations → timeline cards + review + export + retry + timelapse), while intentionally **not** copying macOS‑specific quirks or questionable practices.
+This document describes a clean, cross‑platform reimplementation of Chrona that preserves the *behavioral* outputs of the current macOS app (screen → observations → timeline cards + review + export + retry + timelapse), while intentionally **not** copying macOS‑specific quirks or questionable practices.
 
 ## Constraints (from requirements)
 
@@ -86,7 +86,7 @@ time.ts
 Use Electron’s `app.getPath('userData')` as the root (portable across OSes).
 
 \<userData\>/
-db/dayflow.sqlite
+db/chrona.sqlite
 recordings/screenshots/YYYY-MM-DD/\<timestamp\>.jpg
 timelapses/YYYY-MM-DD/\<timeline_card_id\>.mp4
 logs/app.log (optional)
@@ -499,7 +499,7 @@ Suggested settings (align with current intent):
 Tray menu items:
 
 - Start/Stop Recording (or Pause/Resume)
-- Open Dayflow
+- Open Chrona
 - Open Recordings Folder
 - Settings
 - Quit
@@ -571,12 +571,12 @@ Provide “Copy debug logs” that includes:
 
 ## 10) Deep Links / Automation
 
-Register protocol dayflow://:
+Register protocol chrona://:
 
-- dayflow://start-recording
-- dayflow://stop-recording
-- dayflow://pause-recording (optional)
-- dayflow://resume-recording (optional)
+- chrona://start-recording
+- chrona://stop-recording
+- chrona://pause-recording (optional)
+- chrona://resume-recording (optional)
 
 Route in main process and call capture state transitions.
 
