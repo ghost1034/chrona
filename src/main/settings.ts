@@ -3,10 +3,43 @@ import path from 'node:path'
 import type { Settings } from '../shared/ipc'
 
 const DEFAULT_SETTINGS: Settings = {
-  version: 7,
+  version: 8,
   captureIntervalSeconds: 10,
   captureSelectedDisplayId: null,
   captureIncludeCursor: false,
+
+  categories: [
+    {
+      id: 'cat_work',
+      name: 'Work',
+      color: '#3BD4B2',
+      description: 'Work tasks and professional activities.',
+      order: 10
+    },
+    {
+      id: 'cat_personal',
+      name: 'Personal',
+      color: '#63A9FF',
+      description: 'Personal tasks, errands, and life admin.',
+      order: 20
+    },
+    {
+      id: 'cat_distraction',
+      name: 'Distraction',
+      color: '#FF7A18',
+      description: 'Low-value time, distraction, or unplanned browsing.',
+      order: 30
+    },
+    {
+      id: 'cat_idle',
+      name: 'Idle',
+      color: '#BEC8D4',
+      description: 'Inactivity (away, locked, or no visible interaction).',
+      locked: true,
+      order: 40
+    }
+  ],
+  subcategories: [],
 
   analysisCheckIntervalSeconds: 60,
   analysisLookbackSeconds: 24 * 60 * 60,
@@ -58,14 +91,15 @@ export class SettingsStore {
        parsed?.version !== 4 &&
        parsed?.version !== 5 &&
         parsed?.version !== 6 &&
-        parsed?.version !== 7
+        parsed?.version !== 7 &&
+        parsed?.version !== 8
       ) {
         return DEFAULT_SETTINGS
       }
 
       // Migration: do not force onboarding UI for existing users.
       const fromExistingUser = parsed?.version <= 5
-      const merged: Settings = { ...DEFAULT_SETTINGS, ...parsed, version: 7 }
+      const merged: Settings = { ...DEFAULT_SETTINGS, ...parsed, version: 8 }
       if (fromExistingUser && typeof (parsed as any).onboardingCompleted !== 'boolean') {
         merged.onboardingCompleted = true
       }
@@ -84,7 +118,7 @@ export class SettingsStore {
     const next: Settings = {
       ...current,
       ...patch,
-      version: 7
+      version: 8
     }
 
     await fs.mkdir(path.dirname(this.filePath), { recursive: true })
