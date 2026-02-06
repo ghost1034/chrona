@@ -4,10 +4,14 @@ export type AppPingResponse = {
 }
 
 export type Settings = {
-  version: 7
+  version: 8
   captureIntervalSeconds: number
   captureSelectedDisplayId: string | null
   captureIncludeCursor: boolean
+
+  // Timeline taxonomy
+  categories: import('./categories').CategoryDefinition[]
+  subcategories: import('./categories').SubcategoryDefinition[]
 
   // Analysis scheduling + batching
   analysisCheckIntervalSeconds: number
@@ -108,6 +112,47 @@ export type IpcContract = {
   'settings:update': {
     req: Partial<Omit<Settings, 'version'>>
     res: Settings
+  }
+
+  'categories:getAll': {
+    req: void
+    res: {
+      categories: import('./categories').CategoryDefinition[]
+      subcategories: import('./categories').SubcategoryDefinition[]
+    }
+  }
+  'categories:create': {
+    req: { name: string; color: string; description: string }
+    res: { category: import('./categories').CategoryDefinition }
+  }
+  'categories:update': {
+    req: {
+      id: string
+      patch: Partial<Pick<import('./categories').CategoryDefinition, 'name' | 'color' | 'description'>>
+    }
+    res: { category: import('./categories').CategoryDefinition }
+  }
+  'categories:delete': {
+    req: { id: string; reassignToCategoryId: string }
+    res: { ok: true }
+  }
+
+  'subcategories:create': {
+    req: { categoryId: string; name: string; color: string; description: string }
+    res: { subcategory: import('./categories').SubcategoryDefinition }
+  }
+  'subcategories:update': {
+    req: {
+      id: string
+      patch: Partial<Pick<import('./categories').SubcategoryDefinition, 'name' | 'color' | 'description'>>
+    }
+    res: { subcategory: import('./categories').SubcategoryDefinition }
+  }
+  'subcategories:delete': {
+    req:
+      | { id: string; mode: 'clear' }
+      | { id: string; mode: 'reassign'; reassignToSubcategoryId: string }
+    res: { ok: true }
   }
   'capture:getState': {
     req: void
@@ -305,6 +350,14 @@ export const IPC_CHANNELS = {
   setupGetStatus: 'setup:getStatus',
   settingsGetAll: 'settings:getAll',
   settingsUpdate: 'settings:update',
+
+  categoriesGetAll: 'categories:getAll',
+  categoriesCreate: 'categories:create',
+  categoriesUpdate: 'categories:update',
+  categoriesDelete: 'categories:delete',
+  subcategoriesCreate: 'subcategories:create',
+  subcategoriesUpdate: 'subcategories:update',
+  subcategoriesDelete: 'subcategories:delete',
   captureGetState: 'capture:getState',
   captureSetEnabled: 'capture:setEnabled',
   captureSetInterval: 'capture:setInterval',
