@@ -107,7 +107,16 @@ export function registerIpc(opts: {
     }
   })
   handle('settings:getAll', async () => opts.settings.getAll())
-  handle('settings:update', async (patch) => opts.settings.update(patch ?? {}))
+  handle('settings:update', async (patch) => {
+    const next = await opts.settings.update(patch ?? {})
+
+    // Only reschedule analysis loop when interval changes.
+    if (patch && Object.prototype.hasOwnProperty.call(patch, 'analysisCheckIntervalSeconds')) {
+      opts.analysis.rescheduleFromSettings()
+    }
+
+    return next
+  })
 
   handle('capture:getState', async () => opts.capture.getState())
   handle('capture:setEnabled', async (req) => opts.capture.setEnabled(req.enabled))
