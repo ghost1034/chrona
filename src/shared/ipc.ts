@@ -192,6 +192,24 @@ export type IpcContract = {
     res: { ok: true; filePath: string | null }
   }
 
+  'timeline:saveCsvRange': {
+    req: {
+      startDayKey: string
+      endDayKey: string
+      options?: import('./timelineExport').TimelineExportOptions
+    }
+    res: { ok: true; filePath: string | null }
+  }
+
+  'timeline:saveXlsxRange': {
+    req: {
+      startDayKey: string
+      endDayKey: string
+      options?: import('./timelineExport').TimelineExportOptions
+    }
+    res: { ok: true; filePath: string | null }
+  }
+
   'journal:getDay': {
     req: { dayKey: string }
     res: { dayKey: string; entry: import('./journal').JournalEntryDTO | null }
@@ -304,6 +322,8 @@ export const IPC_CHANNELS = {
   timelineUpdateCardCategory: 'timeline:updateCardCategory',
   timelineCopyDayToClipboard: 'timeline:copyDayToClipboard',
   timelineSaveMarkdownRange: 'timeline:saveMarkdownRange',
+  timelineSaveCsvRange: 'timeline:saveCsvRange',
+  timelineSaveXlsxRange: 'timeline:saveXlsxRange',
   journalGetDay: 'journal:getDay',
   journalUpsert: 'journal:upsert',
   journalDelete: 'journal:delete',
