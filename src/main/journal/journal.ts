@@ -5,6 +5,7 @@ import { GeminiService } from '../gemini/gemini'
 import type { StorageService } from '../storage/storage'
 import type { ReviewRating } from '../storage/storage'
 import type { SettingsStore } from '../settings'
+import { buildJournalDraftSchema } from '../gemini/schemas'
 
 export class JournalService {
   private readonly storage: StorageService
@@ -104,7 +105,8 @@ export class JournalService {
         notes: 'Mock notes: keep a few bullet notes about what happened.',
         reflections: 'Mock reflections: what went well, what to improve next time.',
         summary: 'Mock summary: a short recap of the day.'
-      })
+      }),
+      responseJsonSchema: buildJournalDraftSchema()
     })
 
     let parsed: JournalDraftDTO

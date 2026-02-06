@@ -17,6 +17,7 @@ import { registerChronaMediaProtocol, registerChronaMediaScheme } from './mediaP
 import { AskService } from './ask/ask'
 import { DashboardService } from './dashboard/dashboard'
 import { JournalService } from './journal/journal'
+import { CategoriesService } from './categories/categories'
 
 let quitting = false
 let mainWindow: BrowserWindow | null = null
@@ -195,8 +196,9 @@ async function main() {
   const ask = new AskService({ storage, log, settings })
   const dashboard = new DashboardService({ storage })
   const journal = new JournalService({ storage, log, settings })
+  const categories = new CategoriesService({ settings, storage })
 
-  registerIpc({ settings, capture, storage, analysis, retention, ask, dashboard, journal, log })
+  registerIpc({ settings, capture, storage, analysis, retention, ask, dashboard, journal, categories, log })
 
   win.webContents.on('render-process-gone', (_event, details) => {
     log.error('renderer.gone', { reason: details.reason, exitCode: details.exitCode })

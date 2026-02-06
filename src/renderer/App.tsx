@@ -11,6 +11,7 @@ import { formatBytes } from '../shared/format'
 import type { AskSourceRef } from '../shared/ask'
 import type { JournalDraftDTO, JournalEntryDTO, JournalEntryPatch } from '../shared/journal'
 import type { SetupStatus } from '../shared/ipc'
+import type { CategoryDefinition, SubcategoryDefinition } from '../shared/categories'
 import { DashboardView } from './DashboardView'
 import { SettingsView } from './SettingsView'
 import { OnboardingView } from './OnboardingView'
@@ -80,6 +81,9 @@ export function App() {
   const [dayKey, setDayKey] = useState<string>(() => dayKeyFromUnixSeconds(Math.floor(Date.now() / 1000)))
   const [cards, setCards] = useState<TimelineCardDTO[]>([])
 
+  const [categoryDefs, setCategoryDefs] = useState<CategoryDefinition[]>([])
+  const [subcategoryDefs, setSubcategoryDefs] = useState<SubcategoryDefinition[]>([])
+
   const [exportDialogOpen, setExportDialogOpen] = useState<boolean>(false)
   const [exportFormat, setExportFormat] = useState<'md' | 'csv' | 'xlsx'>('xlsx')
   const [exportStartDayKey, setExportStartDayKey] = useState<string>(dayKey)
@@ -125,6 +129,35 @@ export function App() {
     [cards, selectedCardId]
   )
 
+  const categoryNamesOrdered = useMemo(() => {
+    const sorted = [...categoryDefs].sort((a, b) => (Number(a.order ?? 0) || 0) - (Number(b.order ?? 0) || 0))
+    return sorted.map((c) => c.name)
+  }, [categoryDefs])
+
+  const categoryIdByName = useMemo(() => {
+    const m = new Map<string, string>()
+    for (const c of categoryDefs) m.set(c.name, c.id)
+    return m
+  }, [categoryDefs])
+
+  const categoryColorsByName = useMemo(() => {
+    const out: Record<string, string> = {}
+    for (const c of categoryDefs) out[c.name] = c.color
+    return out
+  }, [categoryDefs])
+
+  const subcategorySuggestionsForSelected = useMemo(() => {
+    const catName = selectedCard?.category ?? ''
+    const catId = categoryIdByName.get(catName) ?? null
+    if (!catId) return []
+
+    const items = subcategoryDefs
+      .filter((s) => s.categoryId === catId)
+      .sort((a, b) => (Number(a.order ?? 0) || 0) - (Number(b.order ?? 0) || 0))
+      .map((s) => s.name)
+    return Array.from(new Set(items))
+  }, [subcategoryDefs, selectedCard?.category, categoryIdByName])
+
   const [selectedVideoUrl, setSelectedVideoUrl] = useState<string | null>(null)
 
   const [askMessages, setAskMessages] = useState<
@@ -157,6 +190,16 @@ export function App() {
       const st = await window.chrona.getSetupStatus()
       setSetupStatus(st)
       setHasGeminiKey(st.hasGeminiKey)
+    } catch {
+      // ignore
+    }
+  }, [])
+
+  const refreshCategoryLibrary = useCallback(async () => {
+    try {
+      const lib = await window.chrona.getCategoryLibrary()
+      setCategoryDefs(Array.isArray(lib.categories) ? lib.categories : [])
+      setSubcategoryDefs(Array.isArray(lib.subcategories) ? lib.subcategories : [])
     } catch {
       // ignore
     }
@@ -198,6 +241,12 @@ export function App() {
       await refreshSetupStatus()
 
       const settings = await window.chrona.getSettings()
+      setCategoryDefs(Array.isArray((settings as any).categories) ? ((settings as any).categories as any) : [])
+      setSubcategoryDefs(
+        Array.isArray((settings as any).subcategories) ? ((settings as any).subcategories as any) : []
+      )
+      // Normalize via main-process validators (best-effort).
+      void refreshCategoryLibrary()
       setTimelapsesEnabled(!!settings.timelapsesEnabled)
       setTimelapseFps(Number(settings.timelapseFps ?? 2) || 2)
       setTimelinePxPerHour(
@@ -702,6 +751,51 @@ export function App() {
       promptPreambleAsk: promptPreambleAsk as any,
       promptPreambleJournalDraft: promptPreambleJournalDraft as any
     } as any)
+  }
+
+  async function onCreateCategory(input: { name: string; color: string; description: string }) {
+    await window.chrona.createCategory(input)
+    await refreshCategoryLibrary()
+  }
+
+  async function onUpdateCategory(input: {
+    id: string
+    patch: Partial<{ name: string; color: string; description: string }>
+  }) {
+    await window.chrona.updateCategory(input as any)
+    await refreshCategoryLibrary()
+  }
+
+  async function onDeleteCategory(input: { id: string; reassignToCategoryId: string }) {
+    await window.chrona.deleteCategory(input)
+    await refreshCategoryLibrary()
+    void refreshDay(dayKeyRef.current, true)
+  }
+
+  async function onCreateSubcategory(input: {
+    categoryId: string
+    name: string
+    color: string
+    description: string
+  }) {
+    await window.chrona.createSubcategory(input as any)
+    await refreshCategoryLibrary()
+  }
+
+  async function onUpdateSubcategory(input: {
+    id: string
+    patch: Partial<{ name: string; color: string; description: string }>
+  }) {
+    await window.chrona.updateSubcategory(input as any)
+    await refreshCategoryLibrary()
+  }
+
+  async function onDeleteSubcategory(input:
+    | { id: string; mode: 'clear' }
+    | { id: string; mode: 'reassign'; reassignToSubcategoryId: string }) {
+    await window.chrona.deleteSubcategory(input as any)
+    await refreshCategoryLibrary()
+    void refreshDay(dayKeyRef.current, true)
   }
 
   async function onToggleAutoStartEnabled(enabled: boolean) {
@@ -1441,7 +1535,7 @@ export function App() {
 
               <div className="timelineControlsRow">
                 <div className="row" style={{ flexWrap: 'wrap' }}>
-                  {['Work', 'Personal', 'Distraction', 'Idle', 'System'].map((cat) => {
+                  {[...categoryNamesOrdered, 'System'].map((cat) => {
                     const active = (timelineFilters.categories ?? []).includes(cat)
                     return (
                       <button
@@ -1540,10 +1634,10 @@ export function App() {
                        <div
                          key={c.id}
                          className={`card ${layout.sizeClass} ${selectedCardId === c.id ? 'selected' : ''} ${c.category === 'System' ? 'system' : ''}`}
-                         style={{
-                           ...layout.style,
-                           ['--catColor' as any]: getCategoryColor(c.category)
-                         }}
+                          style={{
+                            ...layout.style,
+                            ['--catColor' as any]: getCategoryColor(c.category, categoryColorsByName)
+                          }}
                          onClick={() => setSelectedCardId(c.id)}
                          role="button"
                          tabIndex={0}
@@ -1815,6 +1909,16 @@ export function App() {
                   promptPreambleJournalDraft={promptPreambleJournalDraft}
                   setPromptPreambleJournalDraft={setPromptPreambleJournalDraft}
                   onSavePromptPreambles={onSavePromptPreambles}
+
+                  categories={categoryDefs}
+                  subcategories={subcategoryDefs}
+                  onRefreshCategories={refreshCategoryLibrary}
+                  onCreateCategory={onCreateCategory}
+                  onUpdateCategory={onUpdateCategory}
+                  onDeleteCategory={onDeleteCategory}
+                  onCreateSubcategory={onCreateSubcategory}
+                  onUpdateSubcategory={onUpdateSubcategory}
+                  onDeleteSubcategory={onDeleteSubcategory}
                 />
             </div>
           </section>
@@ -1823,6 +1927,7 @@ export function App() {
             <div className="timelineScroll">
               <DashboardView
                 selectedDayKey={dayKey}
+                categories={categoryDefs}
                 onJumpToDay={(k) => {
                   setDayKey(k)
                   setSelectedCardId(null)
@@ -2156,11 +2261,23 @@ export function App() {
                     })
                   }}
                 >
-                  {['Work', 'Personal', 'Distraction', 'Idle', 'System'].map((cat) => (
-                    <option key={cat} value={cat}>
-                      {cat}
-                    </option>
-                  ))}
+                  {selectedCard.category === 'System' ? (
+                    <option value="System">System</option>
+                  ) : (
+                    [...categoryNamesOrdered,
+                      selectedCard.category &&
+                      !categoryNamesOrdered.includes(selectedCard.category) &&
+                      selectedCard.category !== 'System'
+                        ? selectedCard.category
+                        : null
+                    ]
+                      .filter(Boolean)
+                      .map((cat) => (
+                        <option key={String(cat)} value={String(cat)}>
+                          {String(cat)}
+                        </option>
+                      ))
+                  )}
                 </select>
               </div>
 
@@ -2170,6 +2287,7 @@ export function App() {
                   className="input"
                   value={selectedCard.subcategory ?? ''}
                   disabled={selectedCard.category === 'System'}
+                  list={selectedCard.category === 'System' ? undefined : 'chrona-subcategory-suggestions'}
                   onChange={(e) => {
                     const subcategory = e.target.value || null
                     setCards((prev) =>
@@ -2182,6 +2300,13 @@ export function App() {
                     })
                   }}
                 />
+                {selectedCard.category !== 'System' && subcategorySuggestionsForSelected.length > 0 ? (
+                  <datalist id="chrona-subcategory-suggestions">
+                    {subcategorySuggestionsForSelected.map((s) => (
+                      <option key={s} value={s} />
+                    ))}
+                  </datalist>
+                ) : null}
               </div>
 
               {selectedCard.summary ? (

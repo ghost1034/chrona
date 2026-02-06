@@ -580,6 +580,83 @@ export class StorageService {
     })
   }
 
+  async renameCategoryInCards(opts: { fromCategory: string; toCategory: string }): Promise<void> {
+    const from = String(opts.fromCategory ?? '').trim()
+    const to = String(opts.toCategory ?? '').trim()
+    if (!from || !to) return
+    if (from === to) return
+    await this.enqueue(() => {
+      const db = this.mustDb()
+      db.prepare('UPDATE timeline_cards SET category = ? WHERE category = ?').run(to, from)
+    })
+  }
+
+  async reassignCategoryInCards(opts: {
+    fromCategory: string
+    toCategory: string
+    clearSubcategory: boolean
+  }): Promise<void> {
+    const from = String(opts.fromCategory ?? '').trim()
+    const to = String(opts.toCategory ?? '').trim()
+    if (!from || !to) return
+    if (from === to) return
+
+    await this.enqueue(() => {
+      const db = this.mustDb()
+      const tx = db.transaction(() => {
+        if (opts.clearSubcategory) {
+          db.prepare('UPDATE timeline_cards SET category = ?, subcategory = NULL WHERE category = ?').run(to, from)
+        } else {
+          db.prepare('UPDATE timeline_cards SET category = ? WHERE category = ?').run(to, from)
+        }
+      })
+      tx()
+    })
+  }
+
+  async renameSubcategoryInCards(opts: {
+    category: string
+    fromSubcategory: string
+    toSubcategory: string
+  }): Promise<void> {
+    const category = String(opts.category ?? '').trim()
+    const from = String(opts.fromSubcategory ?? '').trim()
+    const to = String(opts.toSubcategory ?? '').trim()
+    if (!category || !from || !to) return
+    if (from === to) return
+
+    await this.enqueue(() => {
+      const db = this.mustDb()
+      db.prepare('UPDATE timeline_cards SET subcategory = ? WHERE category = ? AND subcategory = ?').run(
+        to,
+        category,
+        from
+      )
+    })
+  }
+
+  async reassignSubcategoryInCards(opts: {
+    category: string
+    fromSubcategory: string
+    toSubcategory: string
+  }): Promise<void> {
+    // Alias of rename for clarity.
+    return this.renameSubcategoryInCards(opts)
+  }
+
+  async clearSubcategoryInCards(opts: { category: string; subcategory: string }): Promise<void> {
+    const category = String(opts.category ?? '').trim()
+    const subcategory = String(opts.subcategory ?? '').trim()
+    if (!category || !subcategory) return
+    await this.enqueue(() => {
+      const db = this.mustDb()
+      db.prepare('UPDATE timeline_cards SET subcategory = NULL WHERE category = ? AND subcategory = ?').run(
+        category,
+        subcategory
+      )
+    })
+  }
+
   async replaceCardsInRange(opts: {
     fromTs: number
     toTs: number
