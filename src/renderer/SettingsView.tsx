@@ -1,5 +1,6 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { formatBytes } from '../shared/format'
+import type { CategoryDefinition, SubcategoryDefinition } from '../shared/categories'
 
 const GEMINI_MODELS = ['gemini-2.5-flash', 'gemini-2.5-pro', 'gemini-2.0-flash'] as const
 
@@ -85,10 +86,34 @@ export function SettingsView(props: {
   promptPreambleJournalDraft: string
   setPromptPreambleJournalDraft: (s: string) => void
   onSavePromptPreambles: () => Promise<void>
+
+  categories: CategoryDefinition[]
+  subcategories: SubcategoryDefinition[]
+  onRefreshCategories: () => Promise<void>
+  onCreateCategory: (input: { name: string; color: string; description: string }) => Promise<void>
+  onUpdateCategory: (input: {
+    id: string
+    patch: Partial<{ name: string; color: string; description: string }>
+  }) => Promise<void>
+  onDeleteCategory: (input: { id: string; reassignToCategoryId: string }) => Promise<void>
+  onCreateSubcategory: (input: {
+    categoryId: string
+    name: string
+    color: string
+    description: string
+  }) => Promise<void>
+  onUpdateSubcategory: (input: {
+    id: string
+    patch: Partial<{ name: string; color: string; description: string }>
+  }) => Promise<void>
+  onDeleteSubcategory: (
+    input: { id: string; mode: 'clear' } | { id: string; mode: 'reassign'; reassignToSubcategoryId: string }
+  ) => Promise<void>
 }) {
   const sections = useMemo(
     () => [
       { id: 'capture', label: 'Capture' },
+      { id: 'timeline', label: 'Timeline' },
       { id: 'analysis', label: 'Analysis' },
       { id: 'ai', label: 'AI (Gemini)' },
       { id: 'prompts', label: 'Prompts' },
@@ -99,6 +124,77 @@ export function SettingsView(props: {
   )
 
   const [active, setActive] = useState<string>('capture')
+
+  const [catErr, setCatErr] = useState<string | null>(null)
+  const [catBusy, setCatBusy] = useState<boolean>(false)
+
+  const [newCatName, setNewCatName] = useState<string>('')
+  const [newCatColor, setNewCatColor] = useState<string>('#3BD4B2')
+  const [newCatDescription, setNewCatDescription] = useState<string>('')
+
+  const orderedCategories = useMemo(() => {
+    return [...props.categories].sort(
+      (a, b) => (Number(a.order ?? 0) || 0) - (Number(b.order ?? 0) || 0)
+    )
+  }, [props.categories])
+
+  const [categoryDrafts, setCategoryDrafts] = useState<
+    Record<string, { name: string; color: string; description: string }>
+  >({})
+
+  const [subcategoryDrafts, setSubcategoryDrafts] = useState<
+    Record<string, { name: string; color: string; description: string }>
+  >({})
+
+  const [activeCategoryId, setActiveCategoryId] = useState<string>(() => {
+    const first = orderedCategories[0]
+    return first?.id ?? ''
+  })
+
+  useEffect(() => {
+    if (active !== 'timeline') return
+    const has = orderedCategories.some((c) => c.id === activeCategoryId)
+    if (!has) setActiveCategoryId(orderedCategories[0]?.id ?? '')
+  }, [active, activeCategoryId, orderedCategories])
+
+  useEffect(() => {
+    if (active !== 'timeline') return
+    setCategoryDrafts((prev) => {
+      const next = { ...prev }
+      for (const c of orderedCategories) {
+        if (!next[c.id]) next[c.id] = { name: c.name, color: c.color, description: c.description }
+      }
+      return next
+    })
+  }, [active, orderedCategories])
+
+  const subcategoriesForActive = useMemo(() => {
+    const list = props.subcategories.filter((s) => s.categoryId === activeCategoryId)
+    list.sort((a, b) => (Number(a.order ?? 0) || 0) - (Number(b.order ?? 0) || 0))
+    return list
+  }, [props.subcategories, activeCategoryId])
+
+  useEffect(() => {
+    if (active !== 'timeline') return
+    setSubcategoryDrafts((prev) => {
+      const next = { ...prev }
+      for (const s of props.subcategories) {
+        if (!next[s.id]) next[s.id] = { name: s.name, color: s.color, description: s.description }
+      }
+      return next
+    })
+  }, [active, props.subcategories])
+
+  const [newSubName, setNewSubName] = useState<string>('')
+  const [newSubColor, setNewSubColor] = useState<string>('#9AA4B2')
+  const [newSubDescription, setNewSubDescription] = useState<string>('')
+
+  const [pendingDeleteCategoryId, setPendingDeleteCategoryId] = useState<string | null>(null)
+  const [pendingDeleteCategoryReassignId, setPendingDeleteCategoryReassignId] = useState<string>('')
+
+  const [pendingDeleteSubId, setPendingDeleteSubId] = useState<string | null>(null)
+  const [pendingDeleteSubMode, setPendingDeleteSubMode] = useState<'clear' | 'reassign'>('clear')
+  const [pendingDeleteSubReassignId, setPendingDeleteSubReassignId] = useState<string>('')
 
   return (
     <div className="settingsWrap">
@@ -173,6 +269,505 @@ export function SettingsView(props: {
                   </select>
                 </label>
               </div>
+            </div>
+          </div>
+        ) : null}
+
+        {active === 'timeline' ? (
+          <div className="settingsSection">
+            <div className="sideTitle">Timeline categories</div>
+            <div className="sideMeta">
+              Create, edit, or delete categories and subcategories. Deletions require reassignment.
+            </div>
+
+            <div className="row">
+              <button
+                className="btn"
+                onClick={() =>
+                  void (async () => {
+                    try {
+                      setCatErr(null)
+                      setCatBusy(true)
+                      await props.onRefreshCategories()
+                    } catch (e) {
+                      setCatErr(e instanceof Error ? e.message : String(e))
+                    } finally {
+                      setCatBusy(false)
+                    }
+                  })()
+                }
+                disabled={catBusy}
+              >
+                Refresh
+              </button>
+              {catErr ? <div className="mono error">{catErr}</div> : null}
+            </div>
+
+            <div className="block">
+              <div className="sideTitle">Add category</div>
+              <div className="row">
+                <label className="label">
+                  Name
+                  <input
+                    className="input"
+                    value={newCatName}
+                    onChange={(e) => setNewCatName(e.target.value)}
+                    placeholder="Work"
+                  />
+                </label>
+                <label className="label">
+                  Color
+                  <input
+                    className="input"
+                    type="color"
+                    value={isHexColor(newCatColor) ? newCatColor : '#888888'}
+                    onChange={(e) => setNewCatColor(e.target.value)}
+                  />
+                </label>
+              </div>
+              <div className="row">
+                <label className="label" style={{ flex: 1 }}>
+                  Description
+                  <input
+                    className="input"
+                    value={newCatDescription}
+                    onChange={(e) => setNewCatDescription(e.target.value)}
+                    placeholder="What does this category represent?"
+                  />
+                </label>
+                <button
+                  className="btn btn-accent"
+                  disabled={catBusy}
+                  onClick={() =>
+                    void (async () => {
+                      try {
+                        setCatErr(null)
+                        setCatBusy(true)
+                        await props.onCreateCategory({
+                          name: newCatName,
+                          color: newCatColor,
+                          description: newCatDescription
+                        })
+                        setNewCatName('')
+                        setNewCatDescription('')
+                      } catch (e) {
+                        setCatErr(e instanceof Error ? e.message : String(e))
+                      } finally {
+                        setCatBusy(false)
+                      }
+                    })()
+                  }
+                >
+                  Create
+                </button>
+              </div>
+            </div>
+
+            <div className="block">
+              <div className="sideTitle">Categories</div>
+              {orderedCategories.length === 0 ? <div className="mono">No categories</div> : null}
+              {orderedCategories.map((c) => {
+                const d = categoryDrafts[c.id] ?? {
+                  name: c.name,
+                  color: c.color,
+                  description: c.description
+                }
+
+                const dirty = d.name !== c.name || d.color !== c.color || d.description !== c.description
+
+                return (
+                  <div key={c.id} className="block" style={{ padding: 12 }}>
+                    <div className="row" style={{ alignItems: 'end' }}>
+                      <label className="label" style={{ flex: 1 }}>
+                        Name
+                        <input
+                          className="input"
+                          value={d.name}
+                          disabled={!!c.locked}
+                          onChange={(e) =>
+                            setCategoryDrafts((prev) => ({
+                              ...prev,
+                              [c.id]: { ...d, name: e.target.value }
+                            }))
+                          }
+                        />
+                      </label>
+                      <label className="label">
+                        Color
+                        <input
+                          className="input"
+                          type="color"
+                          value={isHexColor(d.color) ? d.color : '#888888'}
+                          onChange={(e) =>
+                            setCategoryDrafts((prev) => ({
+                              ...prev,
+                              [c.id]: { ...d, color: e.target.value }
+                            }))
+                          }
+                        />
+                      </label>
+                      <button
+                        className="btn"
+                        disabled={catBusy || !dirty}
+                        onClick={() =>
+                          void (async () => {
+                            try {
+                              setCatErr(null)
+                              setCatBusy(true)
+                              await props.onUpdateCategory({
+                                id: c.id,
+                                patch: { name: d.name, color: d.color, description: d.description }
+                              })
+                            } catch (e) {
+                              setCatErr(e instanceof Error ? e.message : String(e))
+                            } finally {
+                              setCatBusy(false)
+                            }
+                          })()
+                        }
+                      >
+                        Save
+                      </button>
+                      <button
+                        className="btn"
+                        disabled={!!c.locked || catBusy}
+                        onClick={() => {
+                          setPendingDeleteCategoryId(c.id)
+                          setPendingDeleteCategoryReassignId(
+                            orderedCategories.find((x) => x.id !== c.id)?.id ?? ''
+                          )
+                        }}
+                      >
+                        Delete…
+                      </button>
+                    </div>
+
+                    <div className="row">
+                      <label className="label" style={{ flex: 1 }}>
+                        Description
+                        <input
+                          className="input"
+                          value={d.description ?? ''}
+                          onChange={(e) =>
+                            setCategoryDrafts((prev) => ({
+                              ...prev,
+                              [c.id]: { ...d, description: e.target.value }
+                            }))
+                          }
+                        />
+                      </label>
+                      {c.locked ? <div className="pill">Locked</div> : null}
+                    </div>
+
+                    {pendingDeleteCategoryId === c.id ? (
+                      <div className="row" style={{ alignItems: 'end' }}>
+                        <label className="label" style={{ flex: 1 }}>
+                          Reassign existing cards to
+                          <select
+                            className="input"
+                            value={pendingDeleteCategoryReassignId}
+                            onChange={(e) => setPendingDeleteCategoryReassignId(e.target.value)}
+                          >
+                            {orderedCategories
+                              .filter((x) => x.id !== c.id)
+                              .map((x) => (
+                                <option key={x.id} value={x.id}>
+                                  {x.name}
+                                </option>
+                              ))}
+                          </select>
+                        </label>
+                        <button
+                          className="btn btn-accent"
+                          disabled={!pendingDeleteCategoryReassignId || catBusy}
+                          onClick={() =>
+                            void (async () => {
+                              try {
+                                setCatErr(null)
+                                setCatBusy(true)
+                                await props.onDeleteCategory({
+                                  id: c.id,
+                                  reassignToCategoryId: pendingDeleteCategoryReassignId
+                                })
+                                setPendingDeleteCategoryId(null)
+                                setPendingDeleteCategoryReassignId('')
+                              } catch (e) {
+                                setCatErr(e instanceof Error ? e.message : String(e))
+                              } finally {
+                                setCatBusy(false)
+                              }
+                            })()
+                          }
+                        >
+                          Confirm delete
+                        </button>
+                        <button
+                          className="btn"
+                          disabled={catBusy}
+                          onClick={() => {
+                            setPendingDeleteCategoryId(null)
+                            setPendingDeleteCategoryReassignId('')
+                          }}
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    ) : null}
+                  </div>
+                )
+              })}
+            </div>
+
+            <div className="block">
+              <div className="sideTitle">Subcategories</div>
+              <div className="row">
+                <label className="label">
+                  Category
+                  <select
+                    className="input"
+                    value={activeCategoryId}
+                    onChange={(e) => setActiveCategoryId(e.target.value)}
+                  >
+                    {orderedCategories.map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {c.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              </div>
+
+              <div className="block">
+                <div className="sideTitle">Add subcategory</div>
+                <div className="row">
+                  <label className="label" style={{ flex: 1 }}>
+                    Name
+                    <input
+                      className="input"
+                      value={newSubName}
+                      onChange={(e) => setNewSubName(e.target.value)}
+                      placeholder="Coding"
+                    />
+                  </label>
+                  <label className="label">
+                    Color
+                    <input
+                      className="input"
+                      type="color"
+                      value={isHexColor(newSubColor) ? newSubColor : '#888888'}
+                      onChange={(e) => setNewSubColor(e.target.value)}
+                    />
+                  </label>
+                </div>
+                <div className="row">
+                  <label className="label" style={{ flex: 1 }}>
+                    Description
+                    <input
+                      className="input"
+                      value={newSubDescription}
+                      onChange={(e) => setNewSubDescription(e.target.value)}
+                      placeholder="Optional details"
+                    />
+                  </label>
+                  <button
+                    className="btn btn-accent"
+                    disabled={!activeCategoryId || catBusy}
+                    onClick={() =>
+                      void (async () => {
+                        try {
+                          setCatErr(null)
+                          setCatBusy(true)
+                          await props.onCreateSubcategory({
+                            categoryId: activeCategoryId,
+                            name: newSubName,
+                            color: newSubColor,
+                            description: newSubDescription
+                          })
+                          setNewSubName('')
+                          setNewSubDescription('')
+                        } catch (e) {
+                          setCatErr(e instanceof Error ? e.message : String(e))
+                        } finally {
+                          setCatBusy(false)
+                        }
+                      })()
+                    }
+                  >
+                    Create
+                  </button>
+                </div>
+              </div>
+
+              {subcategoriesForActive.length === 0 ? <div className="mono">No subcategories</div> : null}
+              {subcategoriesForActive.map((s) => {
+                const d = subcategoryDrafts[s.id] ?? {
+                  name: s.name,
+                  color: s.color,
+                  description: s.description
+                }
+                const dirty = d.name !== s.name || d.color !== s.color || d.description !== s.description
+
+                return (
+                  <div key={s.id} className="block" style={{ padding: 12 }}>
+                    <div className="row" style={{ alignItems: 'end' }}>
+                      <label className="label" style={{ flex: 1 }}>
+                        Name
+                        <input
+                          className="input"
+                          value={d.name}
+                          onChange={(e) =>
+                            setSubcategoryDrafts((prev) => ({
+                              ...prev,
+                              [s.id]: { ...d, name: e.target.value }
+                            }))
+                          }
+                        />
+                      </label>
+                      <label className="label">
+                        Color
+                        <input
+                          className="input"
+                          type="color"
+                          value={isHexColor(d.color) ? d.color : '#888888'}
+                          onChange={(e) =>
+                            setSubcategoryDrafts((prev) => ({
+                              ...prev,
+                              [s.id]: { ...d, color: e.target.value }
+                            }))
+                          }
+                        />
+                      </label>
+                      <button
+                        className="btn"
+                        disabled={catBusy || !dirty}
+                        onClick={() =>
+                          void (async () => {
+                            try {
+                              setCatErr(null)
+                              setCatBusy(true)
+                              await props.onUpdateSubcategory({
+                                id: s.id,
+                                patch: { name: d.name, color: d.color, description: d.description }
+                              })
+                            } catch (e) {
+                              setCatErr(e instanceof Error ? e.message : String(e))
+                            } finally {
+                              setCatBusy(false)
+                            }
+                          })()
+                        }
+                      >
+                        Save
+                      </button>
+                      <button
+                        className="btn"
+                        disabled={catBusy}
+                        onClick={() => {
+                          setPendingDeleteSubId(s.id)
+                          setPendingDeleteSubMode('clear')
+                          setPendingDeleteSubReassignId(
+                            subcategoriesForActive.find((x) => x.id !== s.id)?.id ?? ''
+                          )
+                        }}
+                      >
+                        Delete…
+                      </button>
+                    </div>
+
+                    <div className="row">
+                      <label className="label" style={{ flex: 1 }}>
+                        Description
+                        <input
+                          className="input"
+                          value={d.description ?? ''}
+                          onChange={(e) =>
+                            setSubcategoryDrafts((prev) => ({
+                              ...prev,
+                              [s.id]: { ...d, description: e.target.value }
+                            }))
+                          }
+                        />
+                      </label>
+                    </div>
+
+                  {pendingDeleteSubId === s.id ? (
+                    <div className="row" style={{ alignItems: 'end' }}>
+                      <label className="label" style={{ flex: 1 }}>
+                        On delete
+                        <select
+                          className="input"
+                          value={pendingDeleteSubMode}
+                          onChange={(e) => setPendingDeleteSubMode(e.target.value as any)}
+                        >
+                          <option value="clear">Clear subcategory on cards</option>
+                          <option value="reassign">Reassign to another subcategory</option>
+                        </select>
+                      </label>
+                      {pendingDeleteSubMode === 'reassign' ? (
+                        <label className="label" style={{ flex: 1 }}>
+                          Reassign to
+                          <select
+                            className="input"
+                            value={pendingDeleteSubReassignId}
+                            onChange={(e) => setPendingDeleteSubReassignId(e.target.value)}
+                          >
+                            {subcategoriesForActive
+                              .filter((x) => x.id !== s.id)
+                              .map((x) => (
+                                <option key={x.id} value={x.id}>
+                                  {x.name}
+                                </option>
+                              ))}
+                          </select>
+                        </label>
+                      ) : null}
+                      <button
+                        className="btn btn-accent"
+                        disabled={
+                          catBusy ||
+                          (pendingDeleteSubMode === 'reassign' && !pendingDeleteSubReassignId)
+                        }
+                        onClick={() =>
+                          void (async () => {
+                            try {
+                              setCatErr(null)
+                              setCatBusy(true)
+                              if (pendingDeleteSubMode === 'reassign') {
+                                await props.onDeleteSubcategory({
+                                  id: s.id,
+                                  mode: 'reassign',
+                                  reassignToSubcategoryId: pendingDeleteSubReassignId
+                                })
+                              } else {
+                                await props.onDeleteSubcategory({ id: s.id, mode: 'clear' })
+                              }
+                              setPendingDeleteSubId(null)
+                              setPendingDeleteSubReassignId('')
+                            } catch (e) {
+                              setCatErr(e instanceof Error ? e.message : String(e))
+                            } finally {
+                              setCatBusy(false)
+                            }
+                          })()
+                        }
+                      >
+                        Confirm delete
+                      </button>
+                      <button
+                        className="btn"
+                        disabled={catBusy}
+                        onClick={() => {
+                          setPendingDeleteSubId(null)
+                          setPendingDeleteSubReassignId('')
+                        }}
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  ) : null}
+                  </div>
+                )
+              })}
             </div>
           </div>
         ) : null}
@@ -587,4 +1182,8 @@ export function SettingsView(props: {
       </div>
     </div>
   )
+}
+
+function isHexColor(s: string): boolean {
+  return /^#[0-9a-fA-F]{6}$/.test(String(s ?? '').trim())
 }
