@@ -5,6 +5,7 @@ import type {
   TimelineSearchHitDTO,
   TimelineSearchRequestDTO
 } from '../shared/timeline'
+import { getCategoryColor } from '../shared/categoryColors'
 import { dayKeyFromUnixSeconds, dayWindowForDayKey, formatClockAscii } from '../shared/time'
 import { formatBytes } from '../shared/format'
 import type { AskSourceRef } from '../shared/ask'
@@ -79,6 +80,14 @@ export function App() {
   const [dayKey, setDayKey] = useState<string>(() => dayKeyFromUnixSeconds(Math.floor(Date.now() / 1000)))
   const [cards, setCards] = useState<TimelineCardDTO[]>([])
 
+  const [exportDialogOpen, setExportDialogOpen] = useState<boolean>(false)
+  const [exportFormat, setExportFormat] = useState<'md' | 'csv' | 'xlsx'>('xlsx')
+  const [exportStartDayKey, setExportStartDayKey] = useState<string>(dayKey)
+  const [exportEndDayKey, setExportEndDayKey] = useState<string>(dayKey)
+  const [exportIncludeSystem, setExportIncludeSystem] = useState<boolean>(true)
+  const [exportIncludeReviewCoverage, setExportIncludeReviewCoverage] = useState<boolean>(false)
+  const [exportLine, setExportLine] = useState<string>('')
+
   const [timelineSearchQuery, setTimelineSearchQuery] = useState<string>('')
   const [timelineSearchScopePreset, setTimelineSearchScopePreset] = useState<
     'day' | 'today' | 'yesterday' | 'last7' | 'last30' | 'all'
@@ -108,6 +117,7 @@ export function App() {
 
   const [timelinePxPerHour, setTimelinePxPerHour] = useState<number>(TIMELINE_ZOOM_DEFAULT_PX_PER_HOUR)
   const timelineScrollRef = useRef<HTMLDivElement | null>(null)
+  const pendingScrollToTsRef = useRef<number | null>(null)
   const didInitTimelineZoomRef = useRef<boolean>(false)
   const saveTimelineZoomTimeoutRef = useRef<number | null>(null)
   const selectedCard = useMemo(
@@ -744,8 +754,44 @@ export function App() {
     await window.chrona.copyDayToClipboard(dayKey)
   }
 
-  async function onExportDay() {
-    await window.chrona.saveMarkdownRange(dayKey, dayKey)
+  function openTimelineExportDialog() {
+    setExportStartDayKey(dayKey)
+    setExportEndDayKey(dayKey)
+    setExportLine('')
+    setExportDialogOpen(true)
+  }
+
+  async function runTimelineExport() {
+    const start = exportStartDayKey
+    const end = exportEndDayKey
+    if (!start || !end) {
+      setExportLine('Export failed: start/end date required')
+      return
+    }
+
+    const a = start <= end ? start : end
+    const b = start <= end ? end : start
+
+    setExportLine('Exporting…')
+    try {
+      if (exportFormat === 'md') {
+        await window.chrona.saveMarkdownRange(a, b)
+      } else if (exportFormat === 'csv') {
+        await window.chrona.saveCsvRange(a, b, {
+          includeSystem: exportIncludeSystem,
+          includeReviewCoverage: exportIncludeReviewCoverage
+        })
+      } else {
+        await window.chrona.saveXlsxRange(a, b, {
+          includeSystem: exportIncludeSystem,
+          includeReviewCoverage: exportIncludeReviewCoverage
+        })
+      }
+      setExportLine('Export complete')
+      setExportDialogOpen(false)
+    } catch (e) {
+      setExportLine(`Export failed: ${e instanceof Error ? e.message : String(e)}`)
+    }
   }
 
   function scheduleJournalSave(dayKeyForSave: string, patch: JournalEntryPatch) {
@@ -878,7 +924,57 @@ export function App() {
     setDayKey(next)
   }
 
+  function onNow() {
+    const ts = Math.floor(Date.now() / 1000)
+    const k = dayKeyFromUnixSeconds(ts)
+    pendingScrollToTsRef.current = ts
+    setTimelineSearchScopePreset('day')
+    setView('timeline')
+    setDayKey(k)
+
+    // If we're already on the correct day and mounted, scroll immediately.
+    requestAnimationFrame(() => {
+      const scroller = timelineScrollRef.current
+      if (!scroller) return
+      if (viewRef.current !== 'timeline') return
+      if (dayKeyRef.current !== k) return
+
+      const windowInfo = dayWindowForDayKey(k)
+      const y = timeToYpx(ts, windowInfo.startTs, windowInfo.endTs, timelineMetrics)
+      const anchorFrac = 0.35
+      const targetTop = Math.round(y - scroller.clientHeight * anchorFrac)
+      const maxTop = Math.max(0, scroller.scrollHeight - scroller.clientHeight)
+      const top = clampNumber(targetTop, 0, maxTop)
+      scroller.scrollTo({ top, behavior: 'smooth' })
+      pendingScrollToTsRef.current = null
+    })
+  }
+
   const timelineMetrics = useMemo(() => getTimelineMetrics(timelinePxPerHour), [timelinePxPerHour])
+
+  useEffect(() => {
+    if (pendingScrollToTsRef.current === null) return
+    if (view !== 'timeline') return
+    if (timelineSearchScopePreset !== 'day') return
+
+    const ts = pendingScrollToTsRef.current
+    if (dayKeyFromUnixSeconds(ts) !== dayKey) return
+
+    const scroller = timelineScrollRef.current
+    if (!scroller) return
+
+    const windowInfo = dayWindowForDayKey(dayKey)
+    if (ts < windowInfo.startTs || ts > windowInfo.endTs) return
+
+    const y = timeToYpx(ts, windowInfo.startTs, windowInfo.endTs, timelineMetrics)
+    const anchorFrac = 0.35
+    const targetTop = Math.round(y - scroller.clientHeight * anchorFrac)
+    const maxTop = Math.max(0, scroller.scrollHeight - scroller.clientHeight)
+    const top = clampNumber(targetTop, 0, maxTop)
+
+    scroller.scrollTo({ top, behavior: 'smooth' })
+    pendingScrollToTsRef.current = null
+  }, [dayKey, timelineMetrics, timelineSearchScopePreset, view])
 
   const visibleDayCards = useMemo(() => {
     if (timelineSearchScopePreset !== 'day') return cards
@@ -1077,15 +1173,18 @@ export function App() {
           <button className="btn" onClick={() => shiftDay(-1)}>
             Prev
           </button>
-          <button
-            className="btn"
-            onClick={() => setDayKey(dayKeyFromUnixSeconds(Math.floor(Date.now() / 1000)))}
-          >
-            Today
-          </button>
-          <button className="btn" onClick={() => shiftDay(1)}>
-            Next
-          </button>
+           <button
+             className="btn"
+             onClick={() => setDayKey(dayKeyFromUnixSeconds(Math.floor(Date.now() / 1000)))}
+           >
+             Today
+           </button>
+           <button className="btn" onClick={onNow}>
+             Now
+           </button>
+           <button className="btn" onClick={() => shiftDay(1)}>
+             Next
+           </button>
           <input
             className="input"
             type="date"
@@ -1095,11 +1194,94 @@ export function App() {
           <button className="btn" onClick={() => void (view === 'journal' ? onJournalCopyDay() : onCopyDay())}>
             {view === 'journal' ? 'Copy Journal' : 'Copy Timeline'}
           </button>
-          <button className="btn" onClick={() => void (view === 'journal' ? onJournalExportRange(dayKey, dayKey) : onExportDay())}>
+          <button
+            className="btn"
+            onClick={() => void (view === 'journal' ? onJournalExportRange(dayKey, dayKey) : openTimelineExportDialog())}
+          >
             {view === 'journal' ? 'Export Journal' : 'Export Timeline'}
           </button>
         </div>
       </header>
+
+      {exportDialogOpen && view !== 'journal' ? (
+        <div
+          className="modalOverlay"
+          onMouseDown={(e) => {
+            if (e.target === e.currentTarget) setExportDialogOpen(false)
+          }}
+        >
+          <div className="modal">
+            <div className="modalTitle">Export timeline</div>
+            <div className="modalMeta">Choose a date range and file format.</div>
+
+            <div className="row">
+              <label className="label">
+                Start
+                <input
+                  className="input"
+                  type="date"
+                  value={exportStartDayKey}
+                  onChange={(e) => setExportStartDayKey(e.target.value)}
+                />
+              </label>
+              <label className="label">
+                End
+                <input
+                  className="input"
+                  type="date"
+                  value={exportEndDayKey}
+                  onChange={(e) => setExportEndDayKey(e.target.value)}
+                />
+              </label>
+            </div>
+
+            <div className="row">
+              <label className="label">
+                Format
+                <select className="input" value={exportFormat} onChange={(e) => setExportFormat(e.target.value as any)}>
+                  <option value="xlsx">Excel (.xlsx)</option>
+                  <option value="csv">CSV (.csv)</option>
+                  <option value="md">Markdown (.md)</option>
+                </select>
+              </label>
+            </div>
+
+            <div className="row">
+              <label className="pill">
+                <input
+                  type="checkbox"
+                  checked={exportIncludeSystem}
+                  onChange={(e) => setExportIncludeSystem(e.target.checked)}
+                />
+                Include System cards
+              </label>
+              <label className="pill">
+                <input
+                  type="checkbox"
+                  checked={exportIncludeReviewCoverage}
+                  onChange={(e) => setExportIncludeReviewCoverage(e.target.checked)}
+                />
+                Include review coverage
+              </label>
+            </div>
+
+            {exportLine ? (
+              <div className="row">
+                <div className="mono">{exportLine}</div>
+              </div>
+            ) : null}
+
+            <div className="row" style={{ justifyContent: 'flex-end' }}>
+              <button className="btn" onClick={() => setExportDialogOpen(false)}>
+                Cancel
+              </button>
+              <button className="btn btn-accent" onClick={() => void runTimelineExport()}>
+                Export
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       {setupStatus?.platform === 'darwin' && setupStatus.captureAccess.status === 'denied' ? (
         <div className="setupBanner">
@@ -1352,17 +1534,20 @@ export function App() {
                   {renderTimeTicks(windowInfo.startTs, timelinePxPerHour)}
                   {nowYpx !== null ? <div className="nowLine" style={{ top: `${nowYpx}px` }} /> : null}
 
-                  {visibleDayCards.map((c) => {
-                    const layout = cardLayout(c, windowInfo.startTs, windowInfo.endTs, timelineMetrics)
-                    return (
-                      <div
-                        key={c.id}
-                        className={`card ${layout.sizeClass} ${selectedCardId === c.id ? 'selected' : ''} ${c.category === 'System' ? 'system' : ''}`}
-                        style={layout.style}
-                        onClick={() => setSelectedCardId(c.id)}
-                        role="button"
-                        tabIndex={0}
-                      >
+                   {visibleDayCards.map((c) => {
+                     const layout = cardLayout(c, windowInfo.startTs, windowInfo.endTs, timelineMetrics)
+                     return (
+                       <div
+                         key={c.id}
+                         className={`card ${layout.sizeClass} ${selectedCardId === c.id ? 'selected' : ''} ${c.category === 'System' ? 'system' : ''}`}
+                         style={{
+                           ...layout.style,
+                           ['--catColor' as any]: getCategoryColor(c.category)
+                         }}
+                         onClick={() => setSelectedCardId(c.id)}
+                         role="button"
+                         tabIndex={0}
+                       >
                         <div className="cardTitle">{c.title}</div>
                         <div className="cardMeta">
                           {formatClockAscii(c.startTs)} - {formatClockAscii(c.endTs)} · {c.category}

@@ -17,6 +17,11 @@ import {
 import { dayKeyFromUnixSeconds } from '../shared/time'
 import { dayWindowForDayKey } from '../shared/time'
 import { coverageByCardId } from '../shared/review'
+import {
+  buildTimelineExportRowsForDay,
+  formatLocalDateTimeAscii,
+  formatTimelineRowsCsv
+} from '../shared/timelineExport'
 import type { RetentionService } from './retention/retention'
 import { toChronaMediaUrl } from './mediaProtocol'
 import { applyAutoStart } from './autostart'
@@ -24,6 +29,7 @@ import type { Logger } from './logger'
 import type { AskService } from './ask/ask'
 import type { DashboardService } from './dashboard/dashboard'
 import type { JournalService } from './journal/journal'
+import { buildTimelineXlsxBuffer } from './export/timelineXlsx'
 
 type Handler<K extends keyof IpcContract> = (
   req: IpcContract[K]['req']
@@ -205,6 +211,99 @@ export function registerIpc(opts: {
     })
     if (res.canceled || !res.filePath) return { ok: true, filePath: null }
     await import('node:fs/promises').then((fs) => fs.writeFile(res.filePath!, markdown, 'utf8'))
+    return { ok: true, filePath: res.filePath }
+  })
+
+  handle('timeline:saveCsvRange', async (req) => {
+    const days = await loadDayRange(opts.storage, req.startDayKey, req.endDayKey)
+    const includeReviewCoverage = !!req.options?.includeReviewCoverage
+
+    const rows = [] as ReturnType<typeof buildTimelineExportRowsForDay>
+    for (const d of days) {
+      let coverage: Record<number, number> | null = null
+      if (includeReviewCoverage) {
+        const win = dayWindowForDayKey(d.dayKey)
+        const segments = await opts.storage.fetchReviewSegmentsInRange({
+          startTs: win.startTs,
+          endTs: win.endTs
+        })
+        coverage = coverageByCardId({ cards: d.cards as any, segments, ignoreSystem: true })
+      }
+
+      rows.push(
+        ...buildTimelineExportRowsForDay({
+          dayKey: d.dayKey,
+          cards: d.cards as any,
+          options: req.options,
+          coverageByCardId: coverage
+        })
+      )
+    }
+
+    const csv = formatTimelineRowsCsv({ rows })
+    const defaultName = `chrona-timeline-${req.startDayKey}_to_${req.endDayKey}.csv`
+    const res = await dialog.showSaveDialog({
+      title: 'Export timeline as CSV',
+      defaultPath: defaultName,
+      filters: [{ name: 'CSV', extensions: ['csv'] }]
+    })
+    if (res.canceled || !res.filePath) return { ok: true, filePath: null }
+    await import('node:fs/promises').then((fs) => fs.writeFile(res.filePath!, csv, 'utf8'))
+    return { ok: true, filePath: res.filePath }
+  })
+
+  handle('timeline:saveXlsxRange', async (req) => {
+    const days = await loadDayRange(opts.storage, req.startDayKey, req.endDayKey)
+    const includeReviewCoverage = !!req.options?.includeReviewCoverage
+
+    const rows = [] as ReturnType<typeof buildTimelineExportRowsForDay>
+    for (const d of days) {
+      let coverage: Record<number, number> | null = null
+      if (includeReviewCoverage) {
+        const win = dayWindowForDayKey(d.dayKey)
+        const segments = await opts.storage.fetchReviewSegmentsInRange({
+          startTs: win.startTs,
+          endTs: win.endTs
+        })
+        coverage = coverageByCardId({ cards: d.cards as any, segments, ignoreSystem: true })
+      }
+
+      rows.push(
+        ...buildTimelineExportRowsForDay({
+          dayKey: d.dayKey,
+          cards: d.cards as any,
+          options: req.options,
+          coverageByCardId: coverage
+        })
+      )
+    }
+
+    let tz = 'local'
+    try {
+      tz = Intl.DateTimeFormat().resolvedOptions().timeZone || 'local'
+    } catch {
+      // ignore
+    }
+    const generatedAtLocal = formatLocalDateTimeAscii(Math.floor(Date.now() / 1000))
+
+    const buf = await buildTimelineXlsxBuffer({
+      rows,
+      meta: {
+        startDayKey: req.startDayKey,
+        endDayKey: req.endDayKey,
+        generatedAtLocal,
+        timezone: tz
+      }
+    })
+
+    const defaultName = `chrona-timeline-${req.startDayKey}_to_${req.endDayKey}.xlsx`
+    const res = await dialog.showSaveDialog({
+      title: 'Export timeline as Excel',
+      defaultPath: defaultName,
+      filters: [{ name: 'Excel', extensions: ['xlsx'] }]
+    })
+    if (res.canceled || !res.filePath) return { ok: true, filePath: null }
+    await import('node:fs/promises').then((fs) => fs.writeFile(res.filePath!, buf))
     return { ok: true, filePath: res.filePath }
   })
 
