@@ -3,10 +3,17 @@ import path from 'node:path'
 import type { Settings } from '../shared/ipc'
 
 const DEFAULT_SETTINGS: Settings = {
-  version: 6,
+  version: 7,
   captureIntervalSeconds: 10,
   captureSelectedDisplayId: null,
   captureIncludeCursor: false,
+
+  analysisCheckIntervalSeconds: 60,
+  analysisLookbackSeconds: 24 * 60 * 60,
+  analysisBatchTargetDurationSec: 30 * 60,
+  analysisBatchMaxGapSec: 5 * 60,
+  analysisMinBatchDurationSec: 5 * 60,
+  analysisCardWindowLookbackSec: 60 * 60,
 
   storageLimitRecordingsBytes: 10 * 1024 * 1024 * 1024,
   storageLimitTimelapsesBytes: 10 * 1024 * 1024 * 1024,
@@ -48,16 +55,17 @@ export class SettingsStore {
         parsed?.version !== 1 &&
         parsed?.version !== 2 &&
         parsed?.version !== 3 &&
-        parsed?.version !== 4 &&
-        parsed?.version !== 5 &&
-        parsed?.version !== 6
+       parsed?.version !== 4 &&
+       parsed?.version !== 5 &&
+        parsed?.version !== 6 &&
+        parsed?.version !== 7
       ) {
         return DEFAULT_SETTINGS
       }
 
       // Migration: do not force onboarding UI for existing users.
       const fromExistingUser = parsed?.version <= 5
-      const merged: Settings = { ...DEFAULT_SETTINGS, ...parsed, version: 6 }
+      const merged: Settings = { ...DEFAULT_SETTINGS, ...parsed, version: 7 }
       if (fromExistingUser && typeof (parsed as any).onboardingCompleted !== 'boolean') {
         merged.onboardingCompleted = true
       }
@@ -76,7 +84,7 @@ export class SettingsStore {
     const next: Settings = {
       ...current,
       ...patch,
-      version: 6
+      version: 7
     }
 
     await fs.mkdir(path.dirname(this.filePath), { recursive: true })
