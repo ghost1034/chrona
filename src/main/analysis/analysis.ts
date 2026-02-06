@@ -20,20 +20,9 @@ export class AnalysisService {
   private readonly timelapse: TimelapseService
 
   private timer: NodeJS.Timeout | null = null
+  private stopped = true
   private tickInFlight: Promise<{ createdBatchIds: number[]; unprocessedCount: number }> | null =
     null
-
-  private readonly checkIntervalMs = 60_000
-  private readonly lookbackSec = 24 * 60 * 60
-
-  private readonly targetDurationSec = 30 * 60
-  private readonly maxGapSec = 5 * 60
-  private readonly minBatchDurationSec = 5 * 60
-
-  private windowLookbackSec(): number {
-    // Keep the same overlap property across batching retunes.
-    return 2 * this.targetDurationSec
-  }
 
   private processingInFlight = false
   private processingBatchId: number | null = null
@@ -56,17 +45,52 @@ export class AnalysisService {
 
   start() {
     if (this.timer) return
-    this.log.info('analysis.start', { checkIntervalMs: this.checkIntervalMs })
-    void this.runTickNow()
+    this.stopped = false
+    this.log.info('analysis.start', {})
     void this.drainPendingBatches()
-    this.timer = setInterval(() => {
-      void this.runTickNow()
-    }, this.checkIntervalMs)
+    this.scheduleNextTick(0)
   }
 
   stop() {
-    if (this.timer) clearInterval(this.timer)
+    this.stopped = true
+    if (this.timer) clearTimeout(this.timer)
     this.timer = null
+  }
+
+  rescheduleFromSettings() {
+    if (this.stopped) return
+    void (async () => {
+      const delayMs = await this.getNextCheckIntervalMs()
+      this.scheduleNextTick(delayMs)
+    })()
+  }
+
+  private scheduleNextTick(delayMs: number) {
+    if (this.stopped) return
+    if (this.timer) clearTimeout(this.timer)
+    this.timer = setTimeout(() => {
+      void this.onTimerTick()
+    }, Math.max(0, Math.floor(delayMs)))
+  }
+
+  private async onTimerTick() {
+    try {
+      await this.runTickNow()
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e)
+      this.log.error('analysis.tickFailed', { message })
+    } finally {
+      if (this.stopped) return
+      const delayMs = await this.getNextCheckIntervalMs()
+      this.scheduleNextTick(delayMs)
+    }
+  }
+
+  private async getNextCheckIntervalMs(): Promise<number> {
+    const s = await this.settings.getAll()
+    const raw = Number(s.analysisCheckIntervalSeconds)
+    const sec = clampNumber(raw, { min: 10, max: 10 * 60, fallback: 60 })
+    return sec * 1000
   }
 
   async runTickNow(): Promise<{ createdBatchIds: number[]; unprocessedCount: number }> {
@@ -85,8 +109,9 @@ export class AnalysisService {
   }
 
   private async tick(): Promise<{ createdBatchIds: number[]; unprocessedCount: number }> {
+    const cfg = await this.getAnalysisConfig()
     const nowSec = Math.floor(Date.now() / 1000)
-    const sinceTs = nowSec - this.lookbackSec
+    const sinceTs = nowSec - cfg.lookbackSec
 
     const unprocessed = await this.storage.fetchUnprocessedScreenshots({ sinceTs })
     const unprocessedCount = unprocessed.length
@@ -94,7 +119,7 @@ export class AnalysisService {
 
     const batches = createScreenshotBatches(
       unprocessed.map((s) => ({ id: s.id, capturedAt: s.capturedAt })),
-      { targetDurationSec: this.targetDurationSec, maxGapSec: this.maxGapSec }
+      { targetDurationSec: cfg.targetDurationSec, maxGapSec: cfg.maxGapSec }
     )
 
     const createdBatchIds: number[] = []
@@ -127,16 +152,16 @@ export class AnalysisService {
       }
 
       const duration = b.endTs - b.startTs
-      if (duration < this.minBatchDurationSec) {
+      if (duration < cfg.minBatchDurationSec) {
         await this.storage.setBatchStatus({
           batchId,
           status: 'skipped_short',
-          reason: `duration_lt_${this.minBatchDurationSec}s`
+          reason: `duration_lt_${cfg.minBatchDurationSec}s`
         })
         this.events.analysisBatchUpdated({
           batchId,
           status: 'skipped_short',
-          reason: `duration_lt_${this.minBatchDurationSec}s`
+          reason: `duration_lt_${cfg.minBatchDurationSec}s`
         })
         continue
       }
@@ -249,8 +274,10 @@ export class AnalysisService {
     const batch = await this.storage.getBatch(batchId)
     if (!batch) return
 
+    const cfg = await this.getAnalysisConfig()
+
     const windowEndTs = batch.batchEndTs
-    const windowStartTs = Math.max(0, windowEndTs - this.windowLookbackSec())
+    const windowStartTs = Math.max(0, windowEndTs - cfg.windowLookbackSec)
 
     await this.storage.setBatchStatus({
       batchId,
@@ -353,4 +380,59 @@ export class AnalysisService {
     this.events.timelineUpdated({ dayKey: a })
     if (b !== a) this.events.timelineUpdated({ dayKey: b })
   }
+
+  private async getAnalysisConfig(): Promise<{
+    lookbackSec: number
+    targetDurationSec: number
+    maxGapSec: number
+    minBatchDurationSec: number
+    windowLookbackSec: number
+  }> {
+    const s = await this.settings.getAll()
+
+    const lookbackSec = clampNumber(Number(s.analysisLookbackSeconds), {
+      min: 60 * 60,
+      max: 7 * 24 * 60 * 60,
+      fallback: 24 * 60 * 60
+    })
+
+    const targetDurationSec = clampNumber(Number(s.analysisBatchTargetDurationSec), {
+      min: 5 * 60,
+      max: 4 * 60 * 60,
+      fallback: 30 * 60
+    })
+
+    const maxGapSec = clampNumber(Number(s.analysisBatchMaxGapSec), {
+      min: 10,
+      max: targetDurationSec,
+      fallback: 5 * 60
+    })
+
+    const minBatchDurationSec = clampNumber(Number(s.analysisMinBatchDurationSec), {
+      min: 60,
+      max: targetDurationSec,
+      fallback: 5 * 60
+    })
+
+    const windowLookbackSec = clampNumber(Number(s.analysisCardWindowLookbackSec), {
+      min: 10 * 60,
+      max: 6 * 60 * 60,
+      fallback: 60 * 60
+    })
+
+    return {
+      lookbackSec,
+      targetDurationSec,
+      maxGapSec,
+      minBatchDurationSec,
+      windowLookbackSec
+    }
+  }
+}
+
+function clampNumber(n: number, opts: { min: number; max: number; fallback: number }): number {
+  if (!Number.isFinite(n)) return opts.fallback
+  if (n < opts.min) return opts.min
+  if (n > opts.max) return opts.max
+  return Math.floor(n)
 }

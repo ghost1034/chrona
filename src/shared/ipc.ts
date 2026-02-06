@@ -4,10 +4,18 @@ export type AppPingResponse = {
 }
 
 export type Settings = {
-  version: 6
+  version: 7
   captureIntervalSeconds: number
   captureSelectedDisplayId: string | null
   captureIncludeCursor: boolean
+
+  // Analysis scheduling + batching
+  analysisCheckIntervalSeconds: number
+  analysisLookbackSeconds: number
+  analysisBatchTargetDurationSec: number
+  analysisBatchMaxGapSec: number
+  analysisMinBatchDurationSec: number
+  analysisCardWindowLookbackSec: number
 
   storageLimitRecordingsBytes: number
   storageLimitTimelapsesBytes: number

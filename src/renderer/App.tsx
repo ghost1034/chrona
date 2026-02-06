@@ -41,6 +41,13 @@ export function App() {
   const [selectedDisplayId, setSelectedDisplayId] = useState<string | null>(null)
   const [analysisLine, setAnalysisLine] = useState<string>('')
 
+  const [analysisCheckIntervalSeconds, setAnalysisCheckIntervalSeconds] = useState<string>('60')
+  const [analysisLookbackSeconds, setAnalysisLookbackSeconds] = useState<string>('86400')
+  const [analysisBatchTargetMinutes, setAnalysisBatchTargetMinutes] = useState<string>('30')
+  const [analysisBatchMaxGapMinutes, setAnalysisBatchMaxGapMinutes] = useState<string>('5')
+  const [analysisMinBatchMinutes, setAnalysisMinBatchMinutes] = useState<string>('5')
+  const [analysisCardWindowMinutes, setAnalysisCardWindowMinutes] = useState<string>('60')
+
   const [hasGeminiKey, setHasGeminiKey] = useState<boolean | null>(null)
   const [setupStatus, setSetupStatus] = useState<SetupStatus | null>(null)
   const [onboardingCompleted, setOnboardingCompleted] = useState<boolean>(true)
@@ -185,6 +192,21 @@ export function App() {
       setTimelapseFps(Number(settings.timelapseFps ?? 2) || 2)
       setTimelinePxPerHour(
         clampTimelinePxPerHour(settings.timelinePxPerHour ?? TIMELINE_ZOOM_DEFAULT_PX_PER_HOUR)
+      )
+
+      setAnalysisCheckIntervalSeconds(String(Math.floor(Number((settings as any).analysisCheckIntervalSeconds ?? 60))))
+      setAnalysisLookbackSeconds(String(Math.floor(Number((settings as any).analysisLookbackSeconds ?? 24 * 60 * 60))))
+      setAnalysisBatchTargetMinutes(
+        String(Math.round(Number((settings as any).analysisBatchTargetDurationSec ?? 30 * 60) / 60))
+      )
+      setAnalysisBatchMaxGapMinutes(
+        String(Math.round(Number((settings as any).analysisBatchMaxGapSec ?? 5 * 60) / 60))
+      )
+      setAnalysisMinBatchMinutes(
+        String(Math.round(Number((settings as any).analysisMinBatchDurationSec ?? 5 * 60) / 60))
+      )
+      setAnalysisCardWindowMinutes(
+        String(Math.round(Number((settings as any).analysisCardWindowLookbackSec ?? 60 * 60) / 60))
       )
 
       setGeminiModel(String((settings as any).geminiModel ?? 'gemini-2.5-flash'))
@@ -551,6 +573,68 @@ export function App() {
   async function onRunAnalysisTick() {
     const res = await window.chrona.runAnalysisTick()
     setAnalysisLine(`tick: created=${res.createdBatchIds.length} unprocessed=${res.unprocessedCount}`)
+  }
+
+  function onApplyAnalysisPreset(presetId: string) {
+    switch (presetId) {
+      case 'balanced':
+        setAnalysisCheckIntervalSeconds('60')
+        setAnalysisLookbackSeconds(String(24 * 60 * 60))
+        setAnalysisBatchTargetMinutes('30')
+        setAnalysisBatchMaxGapMinutes('5')
+        setAnalysisMinBatchMinutes('5')
+        setAnalysisCardWindowMinutes('60')
+        return
+      case 'faster':
+        setAnalysisCheckIntervalSeconds('30')
+        setAnalysisLookbackSeconds(String(24 * 60 * 60))
+        setAnalysisBatchTargetMinutes('15')
+        setAnalysisBatchMaxGapMinutes('2')
+        setAnalysisMinBatchMinutes('3')
+        setAnalysisCardWindowMinutes('45')
+        return
+      case 'low_resource':
+        setAnalysisCheckIntervalSeconds('120')
+        setAnalysisLookbackSeconds(String(12 * 60 * 60))
+        setAnalysisBatchTargetMinutes('45')
+        setAnalysisBatchMaxGapMinutes('7')
+        setAnalysisMinBatchMinutes('5')
+        setAnalysisCardWindowMinutes('90')
+        return
+      case 'catch_up':
+        setAnalysisCheckIntervalSeconds('60')
+        setAnalysisLookbackSeconds(String(72 * 60 * 60))
+        setAnalysisBatchTargetMinutes('30')
+        setAnalysisBatchMaxGapMinutes('10')
+        setAnalysisMinBatchMinutes('5')
+        setAnalysisCardWindowMinutes('60')
+        return
+    }
+  }
+
+  async function onSaveAnalysisConfig() {
+    const checkIntervalSec = Math.floor(Number(analysisCheckIntervalSeconds))
+    const lookbackSec = Math.floor(Number(analysisLookbackSeconds))
+    const targetDurationSec = Math.floor(Number(analysisBatchTargetMinutes) * 60)
+    const maxGapSec = Math.floor(Number(analysisBatchMaxGapMinutes) * 60)
+    const minBatchDurationSec = Math.floor(Number(analysisMinBatchMinutes) * 60)
+    const windowLookbackSec = Math.floor(Number(analysisCardWindowMinutes) * 60)
+
+    if (!Number.isFinite(checkIntervalSec) || checkIntervalSec <= 0) return
+    if (!Number.isFinite(lookbackSec) || lookbackSec <= 0) return
+    if (!Number.isFinite(targetDurationSec) || targetDurationSec <= 0) return
+    if (!Number.isFinite(maxGapSec) || maxGapSec <= 0) return
+    if (!Number.isFinite(minBatchDurationSec) || minBatchDurationSec <= 0) return
+    if (!Number.isFinite(windowLookbackSec) || windowLookbackSec <= 0) return
+
+    await window.chrona.updateSettings({
+      analysisCheckIntervalSeconds: checkIntervalSec as any,
+      analysisLookbackSeconds: lookbackSec as any,
+      analysisBatchTargetDurationSec: targetDurationSec as any,
+      analysisBatchMaxGapSec: maxGapSec as any,
+      analysisMinBatchDurationSec: minBatchDurationSec as any,
+      analysisCardWindowLookbackSec: windowLookbackSec as any
+    } as any)
   }
 
   async function onSaveGeminiKey() {
@@ -1482,57 +1566,71 @@ export function App() {
         ) : view === 'settings' ? (
           <section className="timeline">
             <div className="timelineScroll">
-              <SettingsView
-                statusLine={statusLine}
-                recording={recording}
-                systemPaused={systemPaused}
-                lastError={lastError}
-                onToggleRecording={onToggleRecording}
-                interval={interval}
-                setInterval={setInterval}
-                onSaveInterval={onSaveInterval}
-                displays={displays}
-                selectedDisplayId={selectedDisplayId}
-                onSelectDisplay={onSelectDisplay}
-                analysisLine={analysisLine}
-                onRunAnalysisTick={onRunAnalysisTick}
-                storageUsage={storageUsage}
-                limitRecordingsGb={limitRecordingsGb}
-                setLimitRecordingsGb={setLimitRecordingsGb}
-                limitTimelapsesGb={limitTimelapsesGb}
-                setLimitTimelapsesGb={setLimitTimelapsesGb}
-                onSaveStorageLimits={onSaveStorageLimits}
-                onPurgeNow={onPurgeNow}
-                timelapsesEnabled={timelapsesEnabled}
-                onToggleTimelapsesEnabled={onToggleTimelapsesEnabled}
-                timelapseFps={timelapseFps}
-                setTimelapseFps={setTimelapseFps}
-                onSaveTimelapseFps={onSaveTimelapseFps}
-                autoStartEnabled={autoStartEnabled}
-                onToggleAutoStartEnabled={onToggleAutoStartEnabled}
-                hasGeminiKey={hasGeminiKey}
-                geminiKeyInput={geminiKeyInput}
-                setGeminiKeyInput={setGeminiKeyInput}
-                onSaveGeminiKey={onSaveGeminiKey}
-                geminiModel={geminiModel}
-                setGeminiModel={setGeminiModel}
-                geminiRequestTimeoutMs={geminiRequestTimeoutMs}
-                setGeminiRequestTimeoutMs={setGeminiRequestTimeoutMs}
-                geminiMaxAttempts={geminiMaxAttempts}
-                setGeminiMaxAttempts={setGeminiMaxAttempts}
-                geminiLogBodies={geminiLogBodies}
-                setGeminiLogBodies={setGeminiLogBodies}
-                onSaveGeminiRuntime={onSaveGeminiRuntime}
-                promptPreambleTranscribe={promptPreambleTranscribe}
-                setPromptPreambleTranscribe={setPromptPreambleTranscribe}
-                promptPreambleCards={promptPreambleCards}
-                setPromptPreambleCards={setPromptPreambleCards}
-                promptPreambleAsk={promptPreambleAsk}
-                setPromptPreambleAsk={setPromptPreambleAsk}
-                promptPreambleJournalDraft={promptPreambleJournalDraft}
-                setPromptPreambleJournalDraft={setPromptPreambleJournalDraft}
-                onSavePromptPreambles={onSavePromptPreambles}
-              />
+                <SettingsView
+                  statusLine={statusLine}
+                  recording={recording}
+                  systemPaused={systemPaused}
+                  lastError={lastError}
+                  onToggleRecording={onToggleRecording}
+                  interval={interval}
+                  setInterval={setInterval}
+                  onSaveInterval={onSaveInterval}
+                  displays={displays}
+                  selectedDisplayId={selectedDisplayId}
+                  onSelectDisplay={onSelectDisplay}
+                  analysisLine={analysisLine}
+                  onRunAnalysisTick={onRunAnalysisTick}
+                  analysisCheckIntervalSeconds={analysisCheckIntervalSeconds}
+                  setAnalysisCheckIntervalSeconds={setAnalysisCheckIntervalSeconds}
+                  analysisLookbackSeconds={analysisLookbackSeconds}
+                  setAnalysisLookbackSeconds={setAnalysisLookbackSeconds}
+                  analysisBatchTargetMinutes={analysisBatchTargetMinutes}
+                  setAnalysisBatchTargetMinutes={setAnalysisBatchTargetMinutes}
+                  analysisBatchMaxGapMinutes={analysisBatchMaxGapMinutes}
+                  setAnalysisBatchMaxGapMinutes={setAnalysisBatchMaxGapMinutes}
+                  analysisMinBatchMinutes={analysisMinBatchMinutes}
+                  setAnalysisMinBatchMinutes={setAnalysisMinBatchMinutes}
+                  analysisCardWindowMinutes={analysisCardWindowMinutes}
+                  setAnalysisCardWindowMinutes={setAnalysisCardWindowMinutes}
+                  onApplyAnalysisPreset={onApplyAnalysisPreset}
+                  onSaveAnalysisConfig={onSaveAnalysisConfig}
+                  storageUsage={storageUsage}
+                  limitRecordingsGb={limitRecordingsGb}
+                  setLimitRecordingsGb={setLimitRecordingsGb}
+                  limitTimelapsesGb={limitTimelapsesGb}
+                  setLimitTimelapsesGb={setLimitTimelapsesGb}
+                  onSaveStorageLimits={onSaveStorageLimits}
+                  onPurgeNow={onPurgeNow}
+                  timelapsesEnabled={timelapsesEnabled}
+                  onToggleTimelapsesEnabled={onToggleTimelapsesEnabled}
+                  timelapseFps={timelapseFps}
+                  setTimelapseFps={setTimelapseFps}
+                  onSaveTimelapseFps={onSaveTimelapseFps}
+                  autoStartEnabled={autoStartEnabled}
+                  onToggleAutoStartEnabled={onToggleAutoStartEnabled}
+                  hasGeminiKey={hasGeminiKey}
+                  geminiKeyInput={geminiKeyInput}
+                  setGeminiKeyInput={setGeminiKeyInput}
+                  onSaveGeminiKey={onSaveGeminiKey}
+                  geminiModel={geminiModel}
+                  setGeminiModel={setGeminiModel}
+                  geminiRequestTimeoutMs={geminiRequestTimeoutMs}
+                  setGeminiRequestTimeoutMs={setGeminiRequestTimeoutMs}
+                  geminiMaxAttempts={geminiMaxAttempts}
+                  setGeminiMaxAttempts={setGeminiMaxAttempts}
+                  geminiLogBodies={geminiLogBodies}
+                  setGeminiLogBodies={setGeminiLogBodies}
+                  onSaveGeminiRuntime={onSaveGeminiRuntime}
+                  promptPreambleTranscribe={promptPreambleTranscribe}
+                  setPromptPreambleTranscribe={setPromptPreambleTranscribe}
+                  promptPreambleCards={promptPreambleCards}
+                  setPromptPreambleCards={setPromptPreambleCards}
+                  promptPreambleAsk={promptPreambleAsk}
+                  setPromptPreambleAsk={setPromptPreambleAsk}
+                  promptPreambleJournalDraft={promptPreambleJournalDraft}
+                  setPromptPreambleJournalDraft={setPromptPreambleJournalDraft}
+                  onSavePromptPreambles={onSavePromptPreambles}
+                />
             </div>
           </section>
         ) : (

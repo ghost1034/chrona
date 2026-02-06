@@ -24,6 +24,21 @@ export function SettingsView(props: {
   analysisLine: string
   onRunAnalysisTick: () => Promise<void>
 
+  analysisCheckIntervalSeconds: string
+  setAnalysisCheckIntervalSeconds: (s: string) => void
+  analysisLookbackSeconds: string
+  setAnalysisLookbackSeconds: (s: string) => void
+  analysisBatchTargetMinutes: string
+  setAnalysisBatchTargetMinutes: (s: string) => void
+  analysisBatchMaxGapMinutes: string
+  setAnalysisBatchMaxGapMinutes: (s: string) => void
+  analysisMinBatchMinutes: string
+  setAnalysisMinBatchMinutes: (s: string) => void
+  analysisCardWindowMinutes: string
+  setAnalysisCardWindowMinutes: (s: string) => void
+  onApplyAnalysisPreset: (presetId: string) => void
+  onSaveAnalysisConfig: () => Promise<void>
+
   storageUsage: {
     recordingsBytes: number
     timelapsesBytes: number
@@ -165,13 +180,146 @@ export function SettingsView(props: {
         {active === 'analysis' ? (
           <div className="settingsSection">
             <div className="sideTitle">Analysis</div>
-            <div className="sideMeta">Runs automatically every 60s; you can also run a manual tick.</div>
+            <div className="sideMeta">
+              Tuning affects how screenshots are grouped into batches and how much recent context is used to generate
+              cards.
+            </div>
 
-            <div className="row">
-              <button className="btn" onClick={() => void props.onRunAnalysisTick()}>
-                Run analysis tick
-              </button>
-              <div className="mono">{props.analysisLine || '...'}</div>
+            <div className="block">
+              <div className="sideTitle">Presets</div>
+              <div className="sideMeta">Pick a preset to fill values; click Save to apply.</div>
+              <div className="row">
+                <button
+                  className="btn"
+                  title="Balanced defaults (recommended)"
+                  onClick={() => props.onApplyAnalysisPreset('balanced')}
+                >
+                  Balanced
+                </button>
+                <button className="btn" title="Faster updates (more frequent, smaller batches)" onClick={() => props.onApplyAnalysisPreset('faster')}>
+                  Faster updates
+                </button>
+                <button className="btn" title="Lower resource use (less frequent, larger batches)" onClick={() => props.onApplyAnalysisPreset('low_resource')}>
+                  Low resource
+                </button>
+                <button className="btn" title="Catch up after downtime (longer lookback)" onClick={() => props.onApplyAnalysisPreset('catch_up')}>
+                  Catch-up
+                </button>
+              </div>
+            </div>
+
+            <div className="block">
+              <div className="sideTitle">Scheduler</div>
+              <div className="row">
+                <label
+                  className="label"
+                  title="How often Chrona checks for new screenshots to batch and analyze."
+                >
+                  Check interval (seconds)
+                  <input
+                    className="input"
+                    type="number"
+                    min={1}
+                    step={1}
+                    value={props.analysisCheckIntervalSeconds}
+                    onChange={(e) => props.setAnalysisCheckIntervalSeconds(e.target.value)}
+                  />
+                </label>
+                <label
+                  className="label"
+                  title="Only screenshots within this window are eligible for batching. Older unprocessed screenshots will be ignored. Example: 86400 = 24h."
+                >
+                  Lookback window (seconds)
+                  <input
+                    className="input"
+                    type="number"
+                    min={1}
+                    step={60}
+                    value={props.analysisLookbackSeconds}
+                    onChange={(e) => props.setAnalysisLookbackSeconds(e.target.value)}
+                  />
+                </label>
+              </div>
+            </div>
+
+            <div className="block">
+              <div className="sideTitle">Batching &amp; cards</div>
+              <div className="row">
+                <label
+                  className="label"
+                  title="Screenshots are grouped up to this length before Gemini runs. Shorter = faster updates / more calls; longer = slower updates / fewer calls."
+                >
+                  Target batch duration (minutes)
+                  <input
+                    className="input"
+                    type="number"
+                    min={1}
+                    step={1}
+                    value={props.analysisBatchTargetMinutes}
+                    onChange={(e) => props.setAnalysisBatchTargetMinutes(e.target.value)}
+                  />
+                </label>
+                <label
+                  className="label"
+                  title="If the time gap between consecutive screenshots exceeds this, a new batch starts. Increase if you miss captures; decrease for tighter grouping."
+                >
+                  Max gap in batch (minutes)
+                  <input
+                    className="input"
+                    type="number"
+                    min={1}
+                    step={1}
+                    value={props.analysisBatchMaxGapMinutes}
+                    onChange={(e) => props.setAnalysisBatchMaxGapMinutes(e.target.value)}
+                  />
+                </label>
+              </div>
+              <div className="row">
+                <label
+                  className="label"
+                  title="Batches shorter than this are skipped (avoids tiny/low-signal Gemini calls)."
+                >
+                  Min batch duration (minutes)
+                  <input
+                    className="input"
+                    type="number"
+                    min={1}
+                    step={1}
+                    value={props.analysisMinBatchMinutes}
+                    onChange={(e) => props.setAnalysisMinBatchMinutes(e.target.value)}
+                  />
+                </label>
+                <label
+                  className="label"
+                  title="How much recent history Gemini sees when generating cards (sliding window). Larger = more context / more tokens."
+                >
+                  Card generation window (minutes)
+                  <input
+                    className="input"
+                    type="number"
+                    min={1}
+                    step={1}
+                    value={props.analysisCardWindowMinutes}
+                    onChange={(e) => props.setAnalysisCardWindowMinutes(e.target.value)}
+                  />
+                </label>
+              </div>
+              <div className="row">
+                <button className="btn btn-accent" onClick={() => void props.onSaveAnalysisConfig()}>
+                  Save analysis settings
+                </button>
+              </div>
+            </div>
+
+            <div className="block">
+              <div className="sideTitle">Manual</div>
+              <div className="sideMeta">Runs one analysis tick immediately (in addition to the scheduler).</div>
+              <div className="row">
+                <button className="btn" onClick={() => void props.onRunAnalysisTick()}>
+                  Run analysis tick
+                </button>
+                <div className="mono">{props.analysisLine || '...'}</div>
+              </div>
             </div>
           </div>
         ) : null}
