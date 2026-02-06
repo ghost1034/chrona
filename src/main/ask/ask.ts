@@ -6,6 +6,7 @@ import { GeminiService } from '../gemini/gemini'
 import { stripCodeFences } from '../gemini/cards'
 import type { ReviewRating } from '../storage/storage'
 import type { SettingsStore } from '../settings'
+import { buildAskResponseSchema } from '../gemini/schemas'
 
 type TimelineCardLite = {
   id: number
@@ -104,7 +105,8 @@ export class AskService {
           'Mock Ask Chrona response. Set a Gemini API key to enable real answers.\n\nScope is provided, but no model call was made.',
         sources: [],
         followUps: ['What did I spend the most time on?', 'How much time was Distraction?']
-      })
+      }),
+      responseJsonSchema: buildAskResponseSchema()
     })
 
     const extracted = stripCodeFences(rawText)

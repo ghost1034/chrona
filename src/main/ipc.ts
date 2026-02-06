@@ -30,6 +30,7 @@ import type { AskService } from './ask/ask'
 import type { DashboardService } from './dashboard/dashboard'
 import type { JournalService } from './journal/journal'
 import { buildTimelineXlsxBuffer } from './export/timelineXlsx'
+import type { CategoriesService } from './categories/categories'
 
 type Handler<K extends keyof IpcContract> = (
   req: IpcContract[K]['req']
@@ -44,6 +45,7 @@ export function registerIpc(opts: {
   ask: AskService
   dashboard: DashboardService
   journal: JournalService
+  categories: CategoriesService
   log: Logger
 }) {
   const gemini = new GeminiService({ storage: opts.storage, log: opts.log, settings: opts.settings })
@@ -122,6 +124,47 @@ export function registerIpc(opts: {
     }
 
     return next
+  })
+
+  handle('categories:getAll', async () => opts.categories.getAll())
+
+  handle('categories:create', async (req) => {
+    const category = await opts.categories.createCategory({
+      name: req.name,
+      color: req.color,
+      description: req.description
+    })
+    return { category }
+  })
+
+  handle('categories:update', async (req) => {
+    const category = await opts.categories.updateCategory({ id: req.id, patch: req.patch ?? {} })
+    return { category }
+  })
+
+  handle('categories:delete', async (req) => {
+    await opts.categories.deleteCategory({ id: req.id, reassignToCategoryId: req.reassignToCategoryId })
+    return { ok: true }
+  })
+
+  handle('subcategories:create', async (req) => {
+    const subcategory = await opts.categories.createSubcategory({
+      categoryId: req.categoryId,
+      name: req.name,
+      color: req.color,
+      description: req.description
+    })
+    return { subcategory }
+  })
+
+  handle('subcategories:update', async (req) => {
+    const subcategory = await opts.categories.updateSubcategory({ id: req.id, patch: req.patch ?? {} })
+    return { subcategory }
+  })
+
+  handle('subcategories:delete', async (req) => {
+    await opts.categories.deleteSubcategory(req as any)
+    return { ok: true }
   })
 
   handle('capture:getState', async () => opts.capture.getState())

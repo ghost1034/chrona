@@ -1,15 +1,15 @@
 import { useEffect, useMemo, useState } from 'react'
 import type { DashboardStatsDTO } from '../shared/dashboard'
-import { CATEGORY_COLORS } from '../shared/categoryColors'
+import { getCategoryColor } from '../shared/categoryColors'
 import { dayKeyFromUnixSeconds, dayWindowForDayKey } from '../shared/time'
+import type { CategoryDefinition } from '../shared/categories'
 
 type Preset = 'day' | 'today' | 'yesterday' | 'last7' | 'last30' | 'custom'
-
-const CATEGORY_ORDER = ['Work', 'Personal', 'Distraction', 'Idle', 'System', 'Untracked']
 
 export function DashboardView(props: {
   selectedDayKey: string
   onJumpToDay: (dayKey: string) => void
+  categories: CategoryDefinition[]
 }) {
   const [preset, setPreset] = useState<Preset>('day')
   const [includeSystem, setIncludeSystem] = useState<boolean>(false)
@@ -94,6 +94,21 @@ export function DashboardView(props: {
   const trackedSeconds = stats?.trackedSeconds ?? 0
   const untrackedSeconds = stats?.untrackedSeconds ?? 0
 
+  const categoryOrder = useMemo(() => {
+    const sorted = [...props.categories].sort(
+      (a, b) => (Number(a.order ?? 0) || 0) - (Number(b.order ?? 0) || 0)
+    )
+    return sorted.map((c) => c.name)
+  }, [props.categories])
+
+  const categoryColorsByName = useMemo(() => {
+    const out: Record<string, string> = {}
+    for (const c of props.categories) out[c.name] = c.color
+    return out
+  }, [props.categories])
+
+  const categorySortOrder = useMemo(() => [...categoryOrder, 'System', 'Untracked'], [categoryOrder])
+
   const categoryRows = useMemo(() => {
     if (!stats) return []
     const base = [...stats.byCategorySeconds]
@@ -105,8 +120,8 @@ export function DashboardView(props: {
 
     const rows = [...base, includeUntracked].filter((r) => r.seconds > 0)
     rows.sort((a, b) => {
-      const ia = CATEGORY_ORDER.indexOf(a.category)
-      const ib = CATEGORY_ORDER.indexOf(b.category)
+      const ia = categorySortOrder.indexOf(a.category)
+      const ib = categorySortOrder.indexOf(b.category)
       if (ia !== -1 || ib !== -1) {
         if (ia === -1) return 1
         if (ib === -1) return -1
@@ -115,7 +130,7 @@ export function DashboardView(props: {
       return b.seconds - a.seconds
     })
     return rows
-  }, [stats])
+  }, [stats, categorySortOrder])
 
   return (
     <div className="dashboardWrap">
@@ -203,7 +218,7 @@ export function DashboardView(props: {
               {categoryRows.map((r) => {
                 const denom = stats.windowSeconds > 0 ? stats.windowSeconds : 1
                 const pct = (r.seconds / denom) * 100
-                const color = CATEGORY_COLORS[r.category] ?? 'rgba(255, 255, 255, 0.14)'
+                const color = getCategoryColor(r.category, categoryColorsByName)
                 return (
                   <div key={r.category} className="categoryRow">
                     <div className="categoryLeft">
@@ -225,7 +240,12 @@ export function DashboardView(props: {
           <div className="panel">
             <div className="panelTitle">Daily totals</div>
             <div className="dayBars">
-              <DailyStackedBars perDay={stats.perDay} onJumpToDay={props.onJumpToDay} />
+              <DailyStackedBars
+                perDay={stats.perDay}
+                onJumpToDay={props.onJumpToDay}
+                categories={props.categories}
+                categoryColorsByName={categoryColorsByName}
+              />
             </div>
           </div>
 
@@ -250,7 +270,7 @@ export function DashboardView(props: {
               {stats.byTitleSeconds.slice(0, 12).map((t) => (
                 <div key={`${t.category}:${t.title}`} className="topRow">
                   <div className="topTitle">
-                    <span className="dot" style={{ background: CATEGORY_COLORS[t.category] ?? 'rgba(255,255,255,0.14)' }} />
+                    <span className="dot" style={{ background: getCategoryColor(t.category, categoryColorsByName) }} />
                     <span>{t.title}</span>
                   </div>
                   <div className="mono">{formatDuration(t.seconds)}</div>
@@ -272,12 +292,19 @@ export function DashboardView(props: {
 function DailyStackedBars(props: {
   perDay: DashboardStatsDTO['perDay']
   onJumpToDay: (dayKey: string) => void
+  categories: CategoryDefinition[]
+  categoryColorsByName: Record<string, string>
 }) {
   const max = Math.max(1, ...props.perDay.map((d) => d.trackedSeconds))
   const categories = collectCategories(props.perDay)
+
+  const orderedCats = [...props.categories].sort(
+    (a, b) => (Number(a.order ?? 0) || 0) - (Number(b.order ?? 0) || 0)
+  )
+  const sortOrder = [...orderedCats.map((c) => c.name), 'System', 'Untracked']
   const ordered = [...categories].sort((a, b) => {
-    const ia = CATEGORY_ORDER.indexOf(a)
-    const ib = CATEGORY_ORDER.indexOf(b)
+    const ia = sortOrder.indexOf(a)
+    const ib = sortOrder.indexOf(b)
     if (ia !== -1 || ib !== -1) {
       if (ia === -1) return 1
       if (ib === -1) return -1
@@ -306,7 +333,7 @@ function DailyStackedBars(props: {
                   .map((c) => {
                     const seconds = d.byCategorySeconds[c] ?? 0
                     const pct = total > 0 ? (seconds / total) * 100 : 0
-                    const color = CATEGORY_COLORS[c] ?? 'rgba(255,255,255,0.14)'
+                    const color = getCategoryColor(c, props.categoryColorsByName)
                     return (
                       <div
                         key={c}

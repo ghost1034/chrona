@@ -7,8 +7,15 @@ export const CATEGORY_COLORS: Record<string, string> = {
   Untracked: 'rgba(255, 255, 255, 0.08)'
 }
 
-export function getCategoryColor(categoryRaw: string): string {
+export function getCategoryColor(
+  categoryRaw: string,
+  overrides?: Record<string, string> | null
+): string {
   const category = String(categoryRaw ?? '').trim()
+
+  const override = overrides ? overrides[category] : null
+  if (override && String(override).trim()) return String(override).trim()
+
   const known = CATEGORY_COLORS[category]
   if (known) return known
 

@@ -21,6 +21,14 @@ contextBridge.exposeInMainWorld('chrona', {
   updateSettings: (patch: IpcContract['settings:update']['req']) =>
     invoke('settings:update', patch),
 
+  getCategoryLibrary: () => invoke('categories:getAll', undefined),
+  createCategory: (req: IpcContract['categories:create']['req']) => invoke('categories:create', req),
+  updateCategory: (req: IpcContract['categories:update']['req']) => invoke('categories:update', req),
+  deleteCategory: (req: IpcContract['categories:delete']['req']) => invoke('categories:delete', req),
+  createSubcategory: (req: IpcContract['subcategories:create']['req']) => invoke('subcategories:create', req),
+  updateSubcategory: (req: IpcContract['subcategories:update']['req']) => invoke('subcategories:update', req),
+  deleteSubcategory: (req: IpcContract['subcategories:delete']['req']) => invoke('subcategories:delete', req as any),
+
   getCaptureState: () => invoke('capture:getState', undefined),
   setRecordingEnabled: (enabled: boolean) => invoke('capture:setEnabled', { enabled }),
   setCaptureInterval: (intervalSeconds: number) =>
@@ -150,6 +158,17 @@ export type ChronaApi = {
   getSettings: () => InvokeResult<'settings:getAll'>
   updateSettings: (patch: IpcContract['settings:update']['req']) =>
     InvokeResult<'settings:update'>
+
+  getCategoryLibrary: () => InvokeResult<'categories:getAll'>
+  createCategory: (req: IpcContract['categories:create']['req']) => InvokeResult<'categories:create'>
+  updateCategory: (req: IpcContract['categories:update']['req']) => InvokeResult<'categories:update'>
+  deleteCategory: (req: IpcContract['categories:delete']['req']) => InvokeResult<'categories:delete'>
+  createSubcategory: (req: IpcContract['subcategories:create']['req']) =>
+    InvokeResult<'subcategories:create'>
+  updateSubcategory: (req: IpcContract['subcategories:update']['req']) =>
+    InvokeResult<'subcategories:update'>
+  deleteSubcategory: (req: IpcContract['subcategories:delete']['req']) =>
+    InvokeResult<'subcategories:delete'>
 
   getCaptureState: () => InvokeResult<'capture:getState'>
   setRecordingEnabled: (enabled: boolean) => InvokeResult<'capture:setEnabled'>

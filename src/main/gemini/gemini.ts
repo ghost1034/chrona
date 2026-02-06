@@ -6,8 +6,13 @@ import type { Logger } from '../logger'
 import type { StorageService } from '../storage/storage'
 import { buildCompressedTimelineVideo } from './video'
 import { parseAndExpandTranscriptionJson } from './transcription'
-import { parseAndValidateCardsJson, stripCodeFences } from './cards'
+import { DEFAULT_CATEGORIES, parseAndValidateCardsJson, stripCodeFences } from './cards'
 import type { SettingsStore } from '../settings'
+import {
+  buildCardGenerationResponseSchema,
+  buildTranscriptionResponseSchema,
+  type JsonSchema
+} from './schemas'
 
 export type GeminiConfig = {
   model: string
@@ -133,7 +138,9 @@ export class GeminiService {
           }
         ],
         generationConfig: {
-          temperature: 0.1
+          temperature: 0.1,
+          responseMimeType: 'application/json',
+          responseJsonSchema: buildTranscriptionResponseSchema()
         }
       }
 
@@ -210,6 +217,24 @@ export class GeminiService {
   }> {
     const cfg = await this.resolveConfig()
     const settings = this.settings ? await this.settings.getAll() : null
+
+    const allowedCategories = Array.isArray((settings as any)?.categories)
+      ? ((settings as any).categories as any[])
+          .map((c) => String(c?.name ?? '').trim())
+          .filter((c) => c && c !== 'System')
+      : [...DEFAULT_CATEGORIES]
+
+    const allowedCategoriesFinal = allowedCategories.length > 0 ? allowedCategories : [...DEFAULT_CATEGORIES]
+
+    const subcategories = Array.isArray((settings as any)?.subcategories)
+      ? ((settings as any).subcategories as any[])
+          .map((s) => ({
+            categoryId: String(s?.categoryId ?? '').trim(),
+            name: String(s?.name ?? '').trim(),
+            description: String(s?.description ?? '').trim()
+          }))
+          .filter((s) => s.categoryId && s.name)
+      : []
     const apiKey = await getGeminiApiKey()
     if (!apiKey && !process.env.CHRONA_GEMINI_MOCK) {
       throw new Error('Missing Gemini API key (set CHRONA_GEMINI_API_KEY or store via keychain)')
@@ -218,12 +243,13 @@ export class GeminiService {
     if (process.env.CHRONA_GEMINI_MOCK) {
       const endTs = Math.max(opts.windowStartTs + 60, opts.windowEndTs - 60)
       const startTs = Math.max(opts.windowStartTs, endTs - 15 * 60)
+      const mockCategory = allowedCategoriesFinal[0] ?? 'Work'
       const mockJson = JSON.stringify({
         cards: [
           {
             startTs,
             endTs,
-            category: 'Work',
+            category: mockCategory,
             subcategory: 'Mock',
             title: 'Mock activity',
             summary: 'Mock card generation result.'
@@ -234,7 +260,8 @@ export class GeminiService {
       const parsed = parseAndValidateCardsJson({
         jsonText: mockJson,
         windowStartTs: opts.windowStartTs,
-        windowEndTs: opts.windowEndTs
+        windowEndTs: opts.windowEndTs,
+        allowedCategories: allowedCategoriesFinal
       })
 
       return {
@@ -260,15 +287,20 @@ export class GeminiService {
       windowEndTs: opts.windowEndTs,
       observations: opts.observations,
       contextCards: opts.contextCards,
-      preamble: settings?.promptPreambleCards ?? ''
+      preamble: settings?.promptPreambleCards ?? '',
+      allowedCategories: allowedCategoriesFinal,
+      categories: Array.isArray((settings as any)?.categories) ? ((settings as any).categories as any[]) : null,
+      subcategories
     })
 
     const requestBody = {
       contents: [{ role: 'user', parts: [{ text: prompt }] }],
-      generationConfig: {
-        temperature: 0.2
+        generationConfig: {
+          temperature: 0.2,
+          responseMimeType: 'application/json',
+          responseJsonSchema: buildCardGenerationResponseSchema(allowedCategoriesFinal)
+        }
       }
-    }
 
     const callGroupId = `batch:${opts.batchId}:generate_cards:${Date.now()}`
 
@@ -287,7 +319,8 @@ export class GeminiService {
     const parsed = parseAndValidateCardsJson({
       jsonText: extracted,
       windowStartTs: opts.windowStartTs,
-      windowEndTs: opts.windowEndTs
+      windowEndTs: opts.windowEndTs,
+      allowedCategories: allowedCategoriesFinal
     })
     if (parsed.cards.length === 0) {
       throw new Error('Gemini returned no valid cards')
@@ -329,6 +362,7 @@ export class GeminiService {
     prompt: string
     batchId?: number | null
     mockJson: string
+    responseJsonSchema?: JsonSchema | null
   }): Promise<string> {
     const cfg = await this.resolveConfig()
     const apiKey = await getGeminiApiKey()
@@ -347,7 +381,13 @@ export class GeminiService {
     const requestBody = {
       contents: [{ role: 'user', parts: [{ text: opts.prompt }] }],
       generationConfig: {
-        temperature: 0.2
+        temperature: 0.2,
+        ...(opts.responseJsonSchema
+          ? {
+              responseMimeType: 'application/json',
+              responseJsonSchema: opts.responseJsonSchema
+            }
+          : {})
       }
     }
 
@@ -533,7 +573,34 @@ function buildCardGenerationPrompt(opts: {
     summary?: string | null
   }>
   preamble?: string
+  allowedCategories: string[]
+  categories: any[] | null
+  subcategories: Array<{ categoryId: string; name: string; description: string }>
 }): string {
+  const allowed = Array.from(
+    new Set(opts.allowedCategories.map((c) => String(c ?? '').trim()).filter(Boolean))
+  )
+
+  const taxonomy = Array.isArray(opts.categories)
+    ? opts.categories
+        .map((c) => {
+          const id = String(c?.id ?? '').trim()
+          const name = String(c?.name ?? '').trim()
+          if (!id || !name) return null
+          const desc = String(c?.description ?? '').trim()
+          const subs = opts.subcategories
+            .filter((s) => s.categoryId === id)
+            .map((s) => ({ name: s.name, description: s.description }))
+            .slice(0, 50)
+          return {
+            name,
+            description: desc || null,
+            subcategories: subs
+          }
+        })
+        .filter(Boolean)
+    : null
+
   return [
     'Return valid JSON only.',
     opts.preamble && opts.preamble.trim() ? `\nUser instructions:\n${opts.preamble.trim()}\n` : '',
@@ -541,10 +608,13 @@ function buildCardGenerationPrompt(opts: {
     'You are generating timeline activity cards based on timestamped observations.',
     `Window: [${opts.windowStartTs}, ${opts.windowEndTs}] (unix seconds).`,
     '',
-    'Allowed categories: Work, Personal, Distraction, Idle',
+    `Allowed categories: ${allowed.join(', ')}`,
     'Use Idle when the user appears inactive based on evidence in observations.',
     'Do not use Idle to fill gaps in the window or gaps between observations.',
     '',
+    taxonomy ? 'Category taxonomy (JSON):' : '',
+    taxonomy ? JSON.stringify(taxonomy) : '',
+    taxonomy ? '' : '',
     'Observations (JSON array):',
     JSON.stringify(opts.observations),
     '',
@@ -552,11 +622,12 @@ function buildCardGenerationPrompt(opts: {
     JSON.stringify(opts.contextCards),
     '',
     'Output format:',
-    '{"cards":[{"startTs":0,"endTs":0,"category":"Work|Personal|Distraction|Idle","subcategory":"string","title":"string","summary":"string","detailedSummary":"string","appSites":{"primary":"string|null","secondary":"string|null"}}]}',
+    '{"cards":[{"startTs":0,"endTs":0,"category":"<allowed>","subcategory":"string|null","title":"string","summary":"string|null","detailedSummary":"string|null","appSites":{"primary":"string|null","secondary":"string|null"},"distractions":[]}]}',
     '',
     'General Rules:',
     '- Use unix seconds for startTs/endTs.',
     '- Each card must satisfy endTs > startTs.',
+    '- category must be one of the allowed categories exactly.',
     '- Do not output any text outside the JSON.',
     '',
     'Rules for Overlapping:',
