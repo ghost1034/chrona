@@ -11,7 +11,7 @@ export default defineConfig([
     clean: true,
     dts: false,
     splitting: false,
-    external: ['electron']
+    external: ['electron', 'exceljs']
   },
   {
     entry: ['src/tools/db-smoke.ts'],
