@@ -45,6 +45,16 @@ contextBridge.exposeInMainWorld('chrona', {
   copyDayToClipboard: (dayKey: string) => invoke('timeline:copyDayToClipboard', { dayKey }),
   saveMarkdownRange: (startDayKey: string, endDayKey: string) =>
     invoke('timeline:saveMarkdownRange', { startDayKey, endDayKey }),
+  saveCsvRange: (
+    startDayKey: string,
+    endDayKey: string,
+    options?: IpcContract['timeline:saveCsvRange']['req']['options']
+  ) => invoke('timeline:saveCsvRange', { startDayKey, endDayKey, options }),
+  saveXlsxRange: (
+    startDayKey: string,
+    endDayKey: string,
+    options?: IpcContract['timeline:saveXlsxRange']['req']['options']
+  ) => invoke('timeline:saveXlsxRange', { startDayKey, endDayKey, options }),
 
   getJournalDay: (dayKey: string) => invoke('journal:getDay', { dayKey }),
   upsertJournalEntry: (dayKey: string, patch: IpcContract['journal:upsert']['req']['patch']) =>
@@ -165,6 +175,16 @@ export type ChronaApi = {
   }) => InvokeResult<'timeline:updateCardCategory'>
   copyDayToClipboard: (dayKey: string) => InvokeResult<'timeline:copyDayToClipboard'>
   saveMarkdownRange: (startDayKey: string, endDayKey: string) => InvokeResult<'timeline:saveMarkdownRange'>
+  saveCsvRange: (
+    startDayKey: string,
+    endDayKey: string,
+    options?: IpcContract['timeline:saveCsvRange']['req']['options']
+  ) => InvokeResult<'timeline:saveCsvRange'>
+  saveXlsxRange: (
+    startDayKey: string,
+    endDayKey: string,
+    options?: IpcContract['timeline:saveXlsxRange']['req']['options']
+  ) => InvokeResult<'timeline:saveXlsxRange'>
 
   getJournalDay: (dayKey: string) => InvokeResult<'journal:getDay'>
   upsertJournalEntry: (

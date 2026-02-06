@@ -1,17 +1,9 @@
 import { useEffect, useMemo, useState } from 'react'
 import type { DashboardStatsDTO } from '../shared/dashboard'
+import { CATEGORY_COLORS } from '../shared/categoryColors'
 import { dayKeyFromUnixSeconds, dayWindowForDayKey } from '../shared/time'
 
 type Preset = 'day' | 'today' | 'yesterday' | 'last7' | 'last30' | 'custom'
-
-const CATEGORY_COLORS: Record<string, string> = {
-  Work: 'rgba(59, 212, 178, 0.9)',
-  Personal: 'rgba(99, 169, 255, 0.9)',
-  Distraction: 'rgba(255, 122, 24, 0.9)',
-  Idle: 'rgba(190, 200, 212, 0.55)',
-  System: 'rgba(255, 180, 168, 0.75)',
-  Untracked: 'rgba(255, 255, 255, 0.08)'
-}
 
 const CATEGORY_ORDER = ['Work', 'Personal', 'Distraction', 'Idle', 'System', 'Untracked']
 
