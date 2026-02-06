@@ -775,6 +775,20 @@ textarea {
   z-index: 1;
 }
 
+.card::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 4px;
+  background: var(--catColor, rgba(255, 255, 255, 0.14));
+  opacity: 0.95;
+  pointer-events: none;
+  border-top-left-radius: inherit;
+  border-bottom-left-radius: inherit;
+}
+
 .card.card--small {
   padding: 6px 8px;
 }
@@ -982,6 +996,39 @@ textarea {
   border: 1px solid rgba(255, 255, 255, 0.14);
   background: rgba(0, 0, 0, 0.18);
   color: var(--text);
+}
+
+.modalOverlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  backdrop-filter: blur(10px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 22px;
+  z-index: 1000;
+}
+
+.modal {
+  width: min(720px, 100%);
+  border: 1px solid var(--stroke);
+  background: linear-gradient(180deg, rgba(18, 26, 36, 0.96), rgba(15, 20, 27, 0.96));
+  border-radius: 16px;
+  box-shadow: 0 22px 80px rgba(0, 0, 0, 0.55);
+  padding: 14px 16px;
+}
+
+.modalTitle {
+  font-size: 16px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+
+.modalMeta {
+  margin-top: 6px;
+  color: var(--muted);
+  font-size: 12px;
 }
 
 @media (max-width: 700px) {

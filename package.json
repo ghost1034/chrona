@@ -27,6 +27,7 @@
     "@fontsource-variable/ibm-plex-sans": "^5.2.8",
     "@fontsource/ibm-plex-mono": "^5.2.7",
     "better-sqlite3": "^11.10.0",
+    "exceljs": "^4.4.0",
     "ffmpeg-static": "^5.2.0",
     "keytar": "^7.9.0",
     "react": "^19.1.0",
