@@ -1108,6 +1108,28 @@ textarea {
   color: var(--text);
 }
 
+/* Make color inputs actually show their selected color swatch. */
+.input[type="color"] {
+  width: 44px;
+  height: 40px;
+  padding: 0;
+  cursor: pointer;
+}
+
+.input[type="color"]::-webkit-color-swatch-wrapper {
+  padding: 0;
+}
+
+.input[type="color"]::-webkit-color-swatch {
+  border: 0;
+  border-radius: 9px;
+}
+
+.input[type="color"]::-moz-color-swatch {
+  border: 0;
+  border-radius: 9px;
+}
+
 .modalOverlay {
   position: fixed;
   inset: 0;
@@ -1183,6 +1205,10 @@ textarea {
   }
   .input {
     width: 100%;
+  }
+
+  .input[type="color"] {
+    width: 44px;
   }
 
   .kpiGrid {
