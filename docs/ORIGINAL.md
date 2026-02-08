@@ -679,7 +679,7 @@ The timeline UI does not render StorageManager.TimelineCard directly; it convert
     - batchId: Int64? (analysis batch for retry/debug)
     - startTime/endTime: Date
     - title/summary/detailedSummary/category/subcategory
-    - distractions, videoSummaryURL, appSites
+    - videoSummaryURL, appSites
 
 ID strategy:
 

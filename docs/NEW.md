@@ -161,7 +161,7 @@ CREATE TABLE IF NOT EXISTS timeline_cards (
   category TEXT NOT NULL,
   subcategory TEXT,
   detailed_summary TEXT,
-  metadata TEXT,                             -- JSON: {distractions?, appSites?}
+  metadata TEXT,                             -- JSON: {appSites?}
   video_summary_url TEXT,                    -- relative path under userData (optional)
   is_deleted INTEGER NOT NULL DEFAULT 0,
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
@@ -434,8 +434,7 @@ Ask Gemini for timeline cards.
       "title": "Implementing capture scheduler",
       "summary": "Worked on the screenshot capture loop and error handling.",
       "detailedSummary": "Adjusted drift correction, added system pause logic, and tested multi-monitor selection.",
-      "appSites": { "primary": "github.com", "secondary": "docs.google.com" },
-      "distractions": []
+      "appSites": { "primary": "github.com", "secondary": "docs.google.com" }
     }
   ]
 }
@@ -920,10 +919,7 @@ Output schema:
       "title": "string",
       "summary": "string",
       "detailedSummary": "string",
-      "appSites": { "primary": "string|null", "secondary": "string|null" },
-      "distractions": [
-        { "startTs": 0, "endTs": 0, "title": "string", "summary": "string" }
-      ]
+      "appSites": { "primary": "string|null", "secondary": "string|null" }
     }
   ]
 }
