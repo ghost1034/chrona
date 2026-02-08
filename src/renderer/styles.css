@@ -608,7 +608,15 @@ textarea {
   margin-top: 8px;
   font-size: 13px;
   line-height: 1.45;
+  white-space: normal;
+}
+
+.askMsgBody.plain {
   white-space: pre-wrap;
+}
+
+.askMsgBody.md {
+  white-space: normal;
 }
 
 .askSources {
@@ -918,6 +926,108 @@ textarea {
   line-height: 1.45;
   color: var(--text);
   white-space: pre-wrap;
+}
+
+.text.md {
+  white-space: normal;
+}
+
+.md {
+  color: var(--text);
+}
+
+.md > :first-child {
+  margin-top: 0;
+}
+
+.md p {
+  margin: 8px 0 0;
+}
+
+.md ul,
+.md ol {
+  margin: 8px 0 0;
+  padding-left: 18px;
+}
+
+.md li {
+  margin: 4px 0;
+}
+
+.md a {
+  color: rgba(255, 196, 146, 0.95);
+  text-decoration: underline;
+  text-decoration-color: rgba(255, 196, 146, 0.55);
+}
+
+.md a:hover {
+  color: rgba(255, 214, 179, 1);
+}
+
+.md code {
+  font-family: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono",
+    "Courier New", monospace;
+  font-size: 12px;
+}
+
+.md pre {
+  margin: 10px 0 0;
+  padding: 10px;
+  overflow-x: auto;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(0, 0, 0, 0.24);
+}
+
+.md pre code {
+  white-space: pre;
+}
+
+.md blockquote {
+  margin: 10px 0 0;
+  padding: 6px 0 6px 12px;
+  border-left: 2px solid rgba(255, 255, 255, 0.16);
+  color: var(--muted);
+}
+
+.md hr {
+  border: 0;
+  border-top: 1px solid rgba(255, 255, 255, 0.10);
+  margin: 12px 0;
+}
+
+.md-tableWrap {
+  margin-top: 10px;
+  overflow-x: auto;
+}
+
+.md table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.md th,
+.md td {
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  padding: 6px 8px;
+  text-align: left;
+}
+
+.md th {
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--muted);
+  font-weight: 600;
+}
+
+.md-linkBlocked {
+  text-decoration: underline;
+  text-decoration-style: dotted;
+  text-decoration-color: rgba(255, 255, 255, 0.22);
+}
+
+.md-imgBlocked {
+  color: var(--muted);
 }
 
 .video {
