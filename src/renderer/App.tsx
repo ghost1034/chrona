@@ -16,6 +16,7 @@ import type { CategoryDefinition, SubcategoryDefinition } from '../shared/catego
 import { DashboardView } from './DashboardView'
 import { SettingsView } from './SettingsView'
 import { OnboardingView } from './OnboardingView'
+import { Markdown } from './Markdown'
 
 type DisplayInfo = { id: string; bounds: { width: number; height: number }; scaleFactor: number }
 
@@ -1717,7 +1718,9 @@ export function App() {
                   {askMessages.map((m) => (
                     <div key={m.id} className={`askMsg ${m.role === 'user' ? 'user' : 'assistant'}`}>
                       <div className="askMsgRole">{m.role === 'user' ? 'You' : 'Chrona'}</div>
-                      <div className="askMsgBody">{m.content}</div>
+                      <div className={`askMsgBody ${m.role === 'assistant' ? 'md' : 'plain'}`}>
+                        {m.role === 'assistant' ? <Markdown text={m.content} /> : m.content}
+                      </div>
                       {m.role === 'assistant' && m.sources && m.sources.length > 0 ? (
                         <div className="askSources">
                           <div className="askSourcesLabel">Sources</div>
@@ -2167,19 +2170,19 @@ export function App() {
                     <div className="journalDraftGrid">
                       <div className="journalDraftCell">
                         <div className="mono">Intentions</div>
-                        <div className="text">{journalDraft.intentions}</div>
+                        <Markdown className="text md" text={journalDraft.intentions} />
                       </div>
                       <div className="journalDraftCell">
                         <div className="mono">Notes</div>
-                        <div className="text">{journalDraft.notes}</div>
+                        <Markdown className="text md" text={journalDraft.notes} />
                       </div>
                       <div className="journalDraftCell">
                         <div className="mono">Reflections</div>
-                        <div className="text">{journalDraft.reflections}</div>
+                        <Markdown className="text md" text={journalDraft.reflections} />
                       </div>
                       <div className="journalDraftCell">
                         <div className="mono">Summary</div>
-                        <div className="text">{journalDraft.summary}</div>
+                        <Markdown className="text md" text={journalDraft.summary} />
                       </div>
                     </div>
                   </div>
