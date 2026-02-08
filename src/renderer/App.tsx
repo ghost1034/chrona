@@ -8,6 +8,7 @@ import type {
 import { getCategoryColor } from '../shared/categoryColors'
 import { dayKeyFromUnixSeconds, dayWindowForDayKey, formatClockAscii } from '../shared/time'
 import { formatBytes } from '../shared/format'
+import { parseAppSitesFromMetadata } from '../shared/metadata'
 import type { AskSourceRef } from '../shared/ask'
 import type { JournalDraftDTO, JournalEntryDTO, JournalEntryPatch } from '../shared/journal'
 import type { SetupStatus } from '../shared/ipc'
@@ -128,6 +129,17 @@ export function App() {
     () => cards.find((c) => c.id === selectedCardId) ?? null,
     [cards, selectedCardId]
   )
+
+  const selectedCardSites = useMemo(
+    () => parseAppSitesFromMetadata(selectedCard?.metadata ?? null),
+    [selectedCard?.metadata]
+  )
+  const selectedCardSiteList = useMemo(() => {
+    const out: string[] = []
+    if (selectedCardSites.primary) out.push(selectedCardSites.primary)
+    if (selectedCardSites.secondary) out.push(selectedCardSites.secondary)
+    return Array.from(new Set(out))
+  }, [selectedCardSites.primary, selectedCardSites.secondary])
 
   const categoryNamesOrdered = useMemo(() => {
     const sorted = [...categoryDefs].sort((a, b) => (Number(a.order ?? 0) || 0) - (Number(b.order ?? 0) || 0))
@@ -2236,6 +2248,19 @@ export function App() {
                 {formatClockAscii(selectedCard.startTs)} - {formatClockAscii(selectedCard.endTs)}
               </div>
 
+              {selectedCardSiteList.length > 0 ? (
+                <div className="block">
+                  <div className="label">Sites</div>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', marginTop: '8px' }}>
+                    {selectedCardSiteList.map((s) => (
+                      <span key={s} className="pill">
+                        {s}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
+
               {selectedVideoUrl ? (
                 <div className="block">
                   <div className="label">Timelapse</div>
@@ -2627,25 +2652,15 @@ function buildCardSearchHaystack(c: TimelineCardDTO): string {
   parts.push(String(c.category ?? ''))
   parts.push(String(c.subcategory ?? ''))
 
-  const meta = parseCardMetadata(c.metadata)
-  if (meta?.appSites?.primary) parts.push(String(meta.appSites.primary))
-  if (meta?.appSites?.secondary) parts.push(String(meta.appSites.secondary))
+  const sites = parseAppSitesFromMetadata(c.metadata)
+  if (sites.primary) parts.push(String(sites.primary))
+  if (sites.secondary) parts.push(String(sites.secondary))
 
   return parts
     .join(' ')
     .replace(/\s+/g, ' ')
     .trim()
     .toLowerCase()
-}
-
-function parseCardMetadata(metadata: string | null): any {
-  const s = String(metadata ?? '').trim()
-  if (!s) return null
-  try {
-    return JSON.parse(s)
-  } catch {
-    return null
-  }
 }
 
 function renderTimeTicks(windowStartTs: number, pxPerHourRaw: number) {
