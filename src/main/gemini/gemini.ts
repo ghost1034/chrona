@@ -622,7 +622,7 @@ function buildCardGenerationPrompt(opts: {
     JSON.stringify(opts.contextCards),
     '',
     'Output format:',
-    '{"cards":[{"startTs":0,"endTs":0,"category":"<allowed>","subcategory":"string|null","title":"string","summary":"string|null","detailedSummary":"string|null","appSites":{"primary":"string|null","secondary":"string|null"},"distractions":[]}]}',
+    '{"cards":[{"startTs":0,"endTs":0,"category":"<allowed>","subcategory":"string|null","title":"string","summary":"string|null","detailedSummary":"string|null","appSites":{"primary":"string|null","secondary":"string|null"}}]}',
     '',
     'General Rules:',
     '- Use unix seconds for startTs/endTs.',

@@ -58,8 +58,7 @@ export function buildCardGenerationResponseSchema(allowedCategories: string[]): 
             'title',
             'summary',
             'detailedSummary',
-            'appSites',
-            'distractions'
+            'appSites'
           ],
           additionalProperties: false,
           properties: {
@@ -83,21 +82,6 @@ export function buildCardGenerationResponseSchema(allowedCategories: string[]): 
                 secondary: { type: ['string', 'null'] }
               },
               required: ['primary', 'secondary']
-            },
-            distractions: {
-              type: 'array',
-              items: {
-                type: 'object',
-                additionalProperties: false,
-                propertyOrdering: ['startTs', 'endTs', 'title', 'summary'],
-                properties: {
-                  startTs: { type: 'integer' },
-                  endTs: { type: 'integer' },
-                  title: { type: 'string' },
-                  summary: { type: ['string', 'null'] }
-                },
-                required: ['startTs', 'endTs', 'title']
-              }
             }
           },
           required: ['startTs', 'endTs', 'category', 'title']
