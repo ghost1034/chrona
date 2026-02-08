@@ -7,7 +7,6 @@ export type CardGenerationCard = {
   summary?: string | null
   detailedSummary?: string | null
   appSites?: { primary?: string | null; secondary?: string | null } | null
-  distractions?: unknown[]
   metadata?: string | null
 }
 
@@ -76,7 +75,6 @@ export function parseAndValidateCardsJson(opts: {
       summary: normalizeNullableString(summary),
       detailedSummary: normalizeNullableString(detailedSummary),
       appSites: appSitesNormalized,
-      distractions: Array.isArray((c as any).distractions) ? (c as any).distractions : undefined,
       metadata
     })
   }
