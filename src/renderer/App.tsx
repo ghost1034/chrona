@@ -1485,10 +1485,8 @@ export function App() {
                     Clear
                   </button>
                 </div>
-              </div>
 
-              <div className="timelineControlsRow">
-                <div className="row" style={{ flexWrap: 'wrap' }}>
+                <div className="row" style={{ alignSelf: 'end', flexWrap: 'wrap' }}>
                   <label className="pill">
                     <input
                       type="checkbox"
