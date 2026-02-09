@@ -418,7 +418,8 @@ function buildAskPrompt(opts: {
     '- sources must reference only cardId values present in timelineCards.',
     '- If you make a claim about a time period or activity, include at least one supporting source cardId.',
     '- Prefer concise bullets for summaries; use a table only if it helps.',
-    '- Do not include any keys besides answerMarkdown, sources, followUps.'
+    '- Do not include any keys besides answerMarkdown, sources, followUps.',
+    '- Use \\n for line breaks.'
   ].join('\n')
 }
 

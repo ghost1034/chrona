@@ -957,6 +957,31 @@ textarea {
   white-space: pre-wrap;
 }
 
+.obsList {
+  margin-top: 10px;
+  display: grid;
+  gap: 10px;
+}
+
+.obsItem {
+  padding: 10px;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.10);
+  background: rgba(0, 0, 0, 0.14);
+}
+
+.obsTime {
+  color: var(--muted);
+}
+
+.obsText {
+  margin-top: 6px;
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--text);
+  white-space: pre-wrap;
+}
+
 .text.md {
   white-space: normal;
 }

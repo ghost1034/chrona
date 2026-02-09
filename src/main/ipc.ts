@@ -208,6 +208,30 @@ export function registerIpc(opts: {
     }
   })
 
+  handle('timeline:getCardObservations', async (req) => {
+    const cardId = Math.floor(Number(req.cardId))
+    if (!Number.isFinite(cardId) || cardId <= 0) throw new Error('Invalid cardId')
+
+    const card = await opts.storage.fetchTimelineCardById(cardId)
+    if (!card) return { cardId, observations: [] }
+
+    const observations = await opts.storage.fetchObservationsInRange({
+      startTs: card.startTs,
+      endTs: card.endTs
+    })
+
+    return {
+      cardId,
+      observations: observations.map((o) => ({
+        startTs: o.startTs,
+        endTs: o.endTs,
+        observation: o.observation,
+        metadata: o.metadata ?? null,
+        llmModel: o.llmModel ?? null
+      }))
+    }
+  })
+
   handle('timeline:search', async (req) => {
     const res = await opts.storage.searchTimelineCards(req)
     return {
