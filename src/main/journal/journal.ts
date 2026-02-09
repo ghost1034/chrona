@@ -196,11 +196,14 @@ function buildDraftPrompt(opts: {
     '{"intentions":"...","notes":"...","reflections":"...","summary":"..."}',
     '',
     'Writing guidance:',
+    '- Use Markdown inside the string fields (no code fences).',
     '- intentions: 1-4 bullets, forward-looking and realistic',
     '- notes: short bullets about what happened (avoid timecodes)',
     '- reflections: what went well / what was hard / one improvement',
     '- summary: 2-5 bullets or a short paragraph',
     '- Keep tone practical and concise; avoid therapy-speak.',
+    '- Use \\n for line breaks.',
+    '- For bullets, each bullet must be on its own line.',
     '- Do not include any keys besides intentions, notes, reflections, summary.'
   ].join('\n')
 }

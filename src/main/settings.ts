@@ -55,7 +55,7 @@ const DEFAULT_SETTINGS: Settings = {
   autoStartEnabled: false,
   timelinePxPerHour: 600,
 
-  geminiModel: 'gemini-2.5-flash',
+  geminiModel: 'gemini-3-flash-preview',
   geminiRequestTimeoutMs: 60_000,
   geminiMaxAttempts: 3,
   geminiLogBodies: false,
