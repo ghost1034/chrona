@@ -9,6 +9,7 @@ import { getCategoryColor } from '../shared/categoryColors'
 import { dayKeyFromUnixSeconds, dayWindowForDayKey, formatClockAscii } from '../shared/time'
 import { formatBytes } from '../shared/format'
 import { parseAppSitesFromMetadata } from '../shared/metadata'
+import type { ObservationDTO } from '../shared/observations'
 import type { AskSourceRef } from '../shared/ask'
 import type { JournalDraftDTO, JournalEntryDTO, JournalEntryPatch } from '../shared/journal'
 import type { SetupStatus } from '../shared/ipc'
@@ -172,6 +173,10 @@ export function App() {
   }, [subcategoryDefs, selectedCard?.category, categoryIdByName])
 
   const [selectedVideoUrl, setSelectedVideoUrl] = useState<string | null>(null)
+
+  const [selectedCardObservations, setSelectedCardObservations] = useState<ObservationDTO[]>([])
+  const [selectedCardObservationsLoading, setSelectedCardObservationsLoading] = useState<boolean>(false)
+  const [selectedCardObservationsError, setSelectedCardObservationsError] = useState<string | null>(null)
 
   const [askMessages, setAskMessages] = useState<
     Array<{ id: string; role: 'user' | 'assistant'; content: string; sources?: AskSourceRef[] }>
@@ -387,6 +392,35 @@ export function App() {
         setSelectedVideoUrl(null)
       }
     })()
+  }, [selectedCardId])
+
+  useEffect(() => {
+    let cancelled = false
+
+    setSelectedCardObservations([])
+    setSelectedCardObservationsError(null)
+    setSelectedCardObservationsLoading(false)
+
+    if (selectedCardId === null) return
+
+    setSelectedCardObservationsLoading(true)
+    void (async () => {
+      try {
+        const res = await window.chrona.getTimelineCardObservations(selectedCardId)
+        if (cancelled) return
+        setSelectedCardObservations(Array.isArray(res.observations) ? res.observations : [])
+      } catch (e) {
+        if (cancelled) return
+        setSelectedCardObservationsError(e instanceof Error ? e.message : String(e))
+      } finally {
+        if (cancelled) return
+        setSelectedCardObservationsLoading(false)
+      }
+    })()
+
+    return () => {
+      cancelled = true
+    }
   }, [selectedCardId])
 
   useEffect(() => {
@@ -2348,6 +2382,32 @@ export function App() {
                   <div className="text">{selectedCard.detailedSummary}</div>
                 </div>
               ) : null}
+
+              <div className="block">
+                <div className="label">
+                  Observations
+                  {selectedCardObservationsLoading ? ' (loading...)' : ` (${selectedCardObservations.length})`}
+                </div>
+                {selectedCardObservationsError ? (
+                  <div className="mono error">Failed to load observations: {selectedCardObservationsError}</div>
+                ) : null}
+                {!selectedCardObservationsLoading && !selectedCardObservationsError &&
+                selectedCardObservations.length === 0 ? (
+                  <div className="sideMeta">No observations for this interval.</div>
+                ) : null}
+                {selectedCardObservations.length > 0 ? (
+                  <div className="obsList">
+                    {selectedCardObservations.map((o, idx) => (
+                      <div key={`${o.startTs}:${o.endTs}:${idx}`} className="obsItem">
+                        <div className="obsTime mono">
+                          {formatClockAscii(o.startTs)} - {formatClockAscii(o.endTs)}
+                        </div>
+                        <div className="obsText">{o.observation}</div>
+                      </div>
+                    ))}
+                  </div>
+                ) : null}
+              </div>
             </div>
           ) : (
             <div className="sidePanel">
