@@ -47,6 +47,8 @@ contextBridge.exposeInMainWorld('chrona', {
   testGeminiApiKey: (apiKey?: string | null) => invoke('gemini:testApiKey', { apiKey }),
 
   getTimelineDay: (dayKey: string) => invoke('timeline:getDay', { dayKey }),
+  getTimelineCardObservations: (cardId: number) =>
+    invoke('timeline:getCardObservations', { cardId }),
   searchTimeline: (req: IpcContract['timeline:search']['req']) => invoke('timeline:search', req),
   updateTimelineCardCategory: (opts: { cardId: number; category: string; subcategory?: string | null }) =>
     invoke('timeline:updateCardCategory', opts),
@@ -186,6 +188,7 @@ export type ChronaApi = {
   testGeminiApiKey: (apiKey?: string | null) => InvokeResult<'gemini:testApiKey'>
 
   getTimelineDay: (dayKey: string) => InvokeResult<'timeline:getDay'>
+  getTimelineCardObservations: (cardId: number) => InvokeResult<'timeline:getCardObservations'>
   searchTimeline: (req: IpcContract['timeline:search']['req']) => InvokeResult<'timeline:search'>
   updateTimelineCardCategory: (opts: {
     cardId: number
