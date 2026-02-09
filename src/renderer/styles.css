@@ -18,10 +18,15 @@ html,
 body {
   height: 100%;
   margin: 0;
+  overflow: hidden;
   background: radial-gradient(1200px 700px at 15% 10%, rgba(255, 122, 24, 0.22), transparent 55%),
     radial-gradient(1000px 600px at 85% 15%, rgba(255, 179, 64, 0.16), transparent 60%),
     linear-gradient(180deg, var(--bg0), var(--bg1));
   color: var(--text);
+}
+
+#root {
+  height: 100%;
 }
 
 button,
@@ -32,9 +37,13 @@ textarea {
 }
 
 .app {
-  min-height: 100%;
+  height: 100%;
+  min-height: 0;
   padding: 28px 28px 40px;
   box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
 }
 
 .header {
@@ -42,6 +51,7 @@ textarea {
   justify-content: space-between;
   align-items: flex-end;
   margin-bottom: 18px;
+  flex: 0 0 auto;
 }
 
 .toolbar {
@@ -68,7 +78,15 @@ textarea {
   display: grid;
   grid-template-columns: minmax(520px, 1fr) 360px;
   gap: 16px;
-  align-items: start;
+  align-items: stretch;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.timeline,
+.side {
+  min-height: 0;
 }
 
 .settingsWrap {
@@ -76,10 +94,12 @@ textarea {
   background: linear-gradient(180deg, var(--card), var(--card2));
   border-radius: 14px;
   box-shadow: 0 18px 60px var(--shadow);
+  box-sizing: border-box;
   display: grid;
   grid-template-columns: 240px 1fr;
   overflow: hidden;
-  min-height: calc(100vh - 180px);
+  height: 100%;
+  min-height: 0;
 }
 
 .settingsNav {
@@ -88,6 +108,7 @@ textarea {
   display: grid;
   gap: 8px;
   background: rgba(0, 0, 0, 0.12);
+  min-height: 0;
 }
 
 .settingsNavTitle {
@@ -120,6 +141,7 @@ textarea {
 .settingsBody {
   padding: 14px;
   overflow: auto;
+  min-height: 0;
 }
 
 .settingsSection {
@@ -139,6 +161,12 @@ textarea {
   background: linear-gradient(180deg, var(--card), var(--card2));
   border-radius: 14px;
   box-shadow: 0 18px 60px var(--shadow);
+}
+
+.timeline {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
 }
 
 .setupBanner {
@@ -220,10 +248,9 @@ textarea {
 }
 
 .timelineScroll {
-  height: calc(100vh - 180px);
-  min-height: 500px;
+  flex: 1 1 auto;
+  min-height: 0;
   overflow: auto;
-  border-radius: 14px;
 }
 
 .timelineControls {
@@ -232,6 +259,7 @@ textarea {
   background: rgba(0, 0, 0, 0.10);
   border-top-left-radius: 14px;
   border-top-right-radius: 14px;
+  flex: 0 0 auto;
 }
 
 .timelineControlsRow {
@@ -894,8 +922,9 @@ textarea {
 
 .sidePanel {
   padding: 14px;
-  max-height: calc(100vh - 180px);
+  height: 100%;
   overflow: auto;
+  box-sizing: border-box;
 }
 
 .sideTitle {
@@ -1106,6 +1135,7 @@ textarea {
   border: 1px solid rgba(255, 255, 255, 0.14);
   background: rgba(0, 0, 0, 0.18);
   color: var(--text);
+  box-sizing: border-box;
 }
 
 /* Make color inputs actually show their selected color swatch. */
@@ -1140,6 +1170,7 @@ textarea {
   justify-content: center;
   padding: 22px;
   z-index: 1000;
+  overflow: auto;
 }
 
 .modal {
@@ -1149,6 +1180,10 @@ textarea {
   border-radius: 16px;
   box-shadow: 0 22px 80px rgba(0, 0, 0, 0.55);
   padding: 14px 16px;
+  box-sizing: border-box;
+  max-height: calc(100vh - 44px);
+  max-height: calc(100dvh - 44px);
+  overflow: auto;
 }
 
 .modalTitle {
@@ -1169,11 +1204,12 @@ textarea {
   }
   .layout {
     grid-template-columns: 1fr;
+    grid-template-rows: minmax(0, 1fr) minmax(0, 1fr);
   }
 
   .settingsWrap {
     grid-template-columns: 1fr;
-    min-height: unset;
+    height: 100%;
   }
 
   .settingsNav {
@@ -1182,12 +1218,6 @@ textarea {
     grid-auto-flow: column;
     grid-auto-columns: minmax(160px, auto);
     overflow: auto;
-  }
-  .timelineScroll {
-    height: 60vh;
-  }
-  .sidePanel {
-    max-height: 60vh;
   }
   .row {
     flex-direction: column;
