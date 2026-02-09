@@ -37,7 +37,7 @@ export class GeminiService {
     this.log = opts.log
     this.settings = opts.settings ?? null
     this.cfg = {
-      model: 'gemini-2.5-flash',
+      model: 'gemini-3-flash-preview',
       requestTimeoutMs: 60_000,
       maxAttempts: 3,
       logBodies: false,
