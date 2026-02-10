@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { formatBytes } from '../shared/format'
 import type { CategoryDefinition, SubcategoryDefinition } from '../shared/categories'
 
-const GEMINI_MODELS = ['gemini-2.5-flash', 'gemini-2.5-pro', 'gemini-2.0-flash'] as const
+const GEMINI_MODELS = ['gemini-3-flash-preview', 'gemini-2.5-flash', 'gemini-2.5-pro', 'gemini-2.0-flash'] as const
 
 type DisplayInfo = { id: string; bounds: { width: number; height: number }; scaleFactor: number }
 
@@ -952,7 +952,7 @@ export function SettingsView(props: {
                     className="input"
                     value={props.geminiModel}
                     onChange={(e) => props.setGeminiModel(e.target.value)}
-                    placeholder="gemini-2.5-flash"
+                    placeholder="gemini-3-flash-preview"
                   />
                 </label>
                 <div className="row" style={{ padding: 0 }}>
