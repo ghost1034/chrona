@@ -18,6 +18,7 @@ import { AskService } from './ask/ask'
 import { DashboardService } from './dashboard/dashboard'
 import { JournalService } from './journal/journal'
 import { CategoriesService } from './categories/categories'
+import { SyncService } from './sync/sync'
 
 let quitting = false
 let mainWindow: BrowserWindow | null = null
@@ -165,6 +166,19 @@ async function main() {
     }
   })
 
+  const sync = new SyncService({
+    storage,
+    settings,
+    log,
+    events: {
+      syncStatusChanged: (status) => {
+        win.webContents.send(IPC_EVENTS.syncStatusChanged, status)
+      }
+    },
+    platform: process.platform,
+    appVersion: app.getVersion()
+  })
+
   const analysis = new AnalysisService({
     storage,
     log,
@@ -174,12 +188,15 @@ async function main() {
       },
       timelineUpdated: (payload) => {
         win.webContents.send(IPC_EVENTS.timelineUpdated, payload)
+        // New/updated cards → debounced push to CPAAutomation.
+        sync.notifyTimelineUpdated()
       }
     },
     settings,
     timelapse
   })
   analysis.start()
+  await sync.start()
 
   const retention = new RetentionService({
     storage,
@@ -198,7 +215,7 @@ async function main() {
   const journal = new JournalService({ storage, log, settings })
   const categories = new CategoriesService({ settings, storage })
 
-  registerIpc({ settings, capture, storage, analysis, retention, ask, dashboard, journal, categories, log })
+  registerIpc({ settings, capture, storage, analysis, retention, ask, dashboard, journal, categories, sync, log })
 
   win.webContents.on('render-process-gone', (_event, details) => {
     log.error('renderer.gone', { reason: details.reason, exitCode: details.exitCode })

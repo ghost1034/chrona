@@ -3,7 +3,7 @@ import path from 'node:path'
 import type { Settings } from '../shared/ipc'
 
 const DEFAULT_SETTINGS: Settings = {
-  version: 8,
+  version: 9,
   captureIntervalSeconds: 10,
   captureSelectedDisplayId: null,
   captureIncludeCursor: false,
@@ -66,7 +66,11 @@ const DEFAULT_SETTINGS: Settings = {
   promptPreambleJournalDraft: '',
 
   onboardingVersion: 1,
-  onboardingCompleted: false
+  onboardingCompleted: false,
+
+  syncEnabled: false,
+  syncEndpoint: '',
+  syncIntervalSeconds: 300
 }
 
 export class SettingsStore {
@@ -92,14 +96,15 @@ export class SettingsStore {
        parsed?.version !== 5 &&
         parsed?.version !== 6 &&
         parsed?.version !== 7 &&
-        parsed?.version !== 8
+        parsed?.version !== 8 &&
+        parsed?.version !== 9
       ) {
         return DEFAULT_SETTINGS
       }
 
       // Migration: do not force onboarding UI for existing users.
       const fromExistingUser = parsed?.version <= 5
-      const merged: Settings = { ...DEFAULT_SETTINGS, ...parsed, version: 8 }
+      const merged: Settings = { ...DEFAULT_SETTINGS, ...parsed, version: 9 }
       if (fromExistingUser && typeof (parsed as any).onboardingCompleted !== 'boolean') {
         merged.onboardingCompleted = true
       }
@@ -118,7 +123,7 @@ export class SettingsStore {
     const next: Settings = {
       ...current,
       ...patch,
-      version: 8
+      version: 9
     }
 
     await fs.mkdir(path.dirname(this.filePath), { recursive: true })

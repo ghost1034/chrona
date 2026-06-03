@@ -1,3 +1,4 @@
+import crypto from 'node:crypto'
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import Database from 'better-sqlite3'
@@ -75,6 +76,20 @@ export type TimelineSearchResult = {
 }
 
 export type ReviewRating = 'focus' | 'neutral' | 'distracted'
+
+export type SyncCardRow = {
+  cardId: number
+  contentHash: string
+  title: string
+  summary: string | null
+  detailedSummary: string | null
+  category: string
+  subcategory: string | null
+  startTs: number
+  endTs: number
+  dayKey: string
+  createdAt: string | null
+}
 
 export type JournalEntryRow = {
   id: number
@@ -733,6 +748,232 @@ export class StorageService {
     })
   }
 
+  // ---------------------------------------------------------------------
+  // Sync tracking (CPAAutomation). timeline_cards has no updated_at, so
+  // change detection is content-hash based via the sync_state sidecar table.
+  // ---------------------------------------------------------------------
+
+  async getSyncMeta(key: string): Promise<string | null> {
+    return this.enqueue(() => {
+      const db = this.mustDb()
+      const row = db.prepare('SELECT v FROM sync_meta WHERE k = ?').get(key) as any
+      return row?.v === null || row?.v === undefined ? null : String(row.v)
+    })
+  }
+
+  async setSyncMeta(key: string, value: string | null): Promise<void> {
+    await this.enqueue(() => {
+      const db = this.mustDb()
+      if (value === null) {
+        db.prepare('DELETE FROM sync_meta WHERE k = ?').run(key)
+        return
+      }
+      db.prepare(
+        'INSERT INTO sync_meta (k, v) VALUES (?, ?) ON CONFLICT(k) DO UPDATE SET v = excluded.v'
+      ).run(key, value)
+    })
+  }
+
+  /**
+   * Refresh sync_state from timeline_cards.
+   *
+   * Incremental (default): scans cards above the last-seen id (new inserts,
+   * including replaceCardsInRange replacements) plus tracked cards that were
+   * newly soft-deleted. In-place edits of old cards are NOT caught here —
+   * callers run a `full` scan periodically (and a targeted reconcile on the
+   * known edit path, updateCardCategory).
+   */
+  async reconcileSyncState(opts?: { full?: boolean }): Promise<{ scanned: number }> {
+    const full = !!opts?.full
+    return this.enqueue(() => {
+      const db = this.mustDb()
+      const tx = db.transaction(() => {
+        const lastSeenRow = db
+          .prepare("SELECT v FROM sync_meta WHERE k = 'last_seen_card_id'")
+          .get() as any
+        const lastSeen = Number(lastSeenRow?.v ?? 0) || 0
+
+        const cardCols =
+          'id, title, summary, detailed_summary, category, subcategory, start_ts, end_ts, is_deleted'
+
+        let rows: any[]
+        if (full) {
+          rows = db.prepare(`SELECT ${cardCols} FROM timeline_cards`).all() as any[]
+        } else {
+          rows = db
+            .prepare(
+              `SELECT ${cardCols} FROM timeline_cards WHERE id > ?
+               UNION
+               SELECT ${cardCols} FROM timeline_cards
+               WHERE id IN (
+                 SELECT tc.id FROM timeline_cards tc
+                 JOIN sync_state ss ON ss.card_id = tc.id
+                 WHERE tc.is_deleted = 1 AND ss.is_deleted = 0
+               )`
+            )
+            .all(lastSeen) as any[]
+        }
+
+        const upsert = db.prepare(`
+          INSERT INTO sync_state (card_id, content_hash, is_deleted, updated_at)
+          VALUES (?, ?, ?, ?)
+          ON CONFLICT(card_id) DO UPDATE SET
+            content_hash = excluded.content_hash,
+            is_deleted = excluded.is_deleted,
+            updated_at = excluded.updated_at
+        `)
+
+        const now = Math.floor(Date.now() / 1000)
+        for (const r of rows) {
+          upsert.run(Number(r.id), contentHashForCardRow(r), Number(r.is_deleted) === 1 ? 1 : 0, now)
+        }
+
+        // Cards deleted before the server ever saw them need no delete event.
+        db.prepare(
+          `UPDATE sync_state SET synced_deleted = 1, updated_at = ?
+           WHERE is_deleted = 1 AND synced_deleted = 0 AND synced_hash IS NULL`
+        ).run(now)
+
+        const maxRow = db.prepare('SELECT COALESCE(MAX(id), 0) AS m FROM timeline_cards').get() as any
+        db.prepare(
+          "INSERT INTO sync_meta (k, v) VALUES ('last_seen_card_id', ?) ON CONFLICT(k) DO UPDATE SET v = excluded.v"
+        ).run(String(Number(maxRow?.m ?? 0)))
+
+        return { scanned: rows.length }
+      })
+
+      return tx()
+    })
+  }
+
+  /** Targeted reconcile for a single card (the updateCardCategory edit path). */
+  async reconcileSyncCardById(cardId: number): Promise<void> {
+    await this.enqueue(() => {
+      const db = this.mustDb()
+      const r = db
+        .prepare(
+          `SELECT id, title, summary, detailed_summary, category, subcategory, start_ts, end_ts, is_deleted
+           FROM timeline_cards WHERE id = ?`
+        )
+        .get(cardId) as any
+      if (!r) return
+
+      db.prepare(`
+        INSERT INTO sync_state (card_id, content_hash, is_deleted, updated_at)
+        VALUES (?, ?, ?, ?)
+        ON CONFLICT(card_id) DO UPDATE SET
+          content_hash = excluded.content_hash,
+          is_deleted = excluded.is_deleted,
+          updated_at = excluded.updated_at
+      `).run(
+        Number(r.id),
+        contentHashForCardRow(r),
+        Number(r.is_deleted) === 1 ? 1 : 0,
+        Math.floor(Date.now() / 1000)
+      )
+    })
+  }
+
+  /** Active cards whose content has never been acked (or changed since the ack). */
+  async getCardsToSync(limit: number): Promise<SyncCardRow[]> {
+    const safeLimit = clampInt(limit, 1, 500)
+    return this.enqueue(() => {
+      const db = this.mustDb()
+      const rows = db
+        .prepare(
+          `SELECT tc.id, tc.title, tc.summary, tc.detailed_summary, tc.category, tc.subcategory,
+                  tc.start_ts, tc.end_ts, tc.day, tc.created_at, ss.content_hash
+           FROM sync_state ss
+           JOIN timeline_cards tc ON tc.id = ss.card_id
+           WHERE ss.is_deleted = 0
+             AND (ss.synced_hash IS NULL OR ss.synced_hash <> ss.content_hash)
+           ORDER BY ss.card_id ASC
+           LIMIT ?`
+        )
+        .all(safeLimit) as any[]
+
+      return rows.map((r) => ({
+        cardId: Number(r.id),
+        contentHash: String(r.content_hash),
+        title: String(r.title),
+        summary: r.summary ?? null,
+        detailedSummary: r.detailed_summary ?? null,
+        category: String(r.category),
+        subcategory: r.subcategory ?? null,
+        startTs: Number(r.start_ts),
+        endTs: Number(r.end_ts),
+        dayKey: String(r.day),
+        createdAt: r.created_at ?? null
+      }))
+    })
+  }
+
+  /** Previously-synced cards that were soft-deleted locally since the last ack. */
+  async getDeletedCardsToSync(limit: number): Promise<number[]> {
+    const safeLimit = clampInt(limit, 1, 500)
+    return this.enqueue(() => {
+      const db = this.mustDb()
+      const rows = db
+        .prepare(
+          `SELECT card_id FROM sync_state
+           WHERE is_deleted = 1 AND synced_deleted = 0
+           ORDER BY card_id ASC
+           LIMIT ?`
+        )
+        .all(safeLimit) as any[]
+      return rows.map((r) => Number(r.card_id))
+    })
+  }
+
+  /** Record the server ack. synced_hash is the hash that was actually sent. */
+  async markCardsSynced(opts: {
+    synced: Array<{ cardId: number; contentHash: string }>
+    deletedCardIds: number[]
+  }): Promise<void> {
+    if (opts.synced.length === 0 && opts.deletedCardIds.length === 0) return
+    await this.enqueue(() => {
+      const db = this.mustDb()
+      const now = Math.floor(Date.now() / 1000)
+      const tx = db.transaction(() => {
+        const ack = db.prepare('UPDATE sync_state SET synced_hash = ?, updated_at = ? WHERE card_id = ?')
+        for (const s of opts.synced) ack.run(s.contentHash, now, s.cardId)
+
+        if (opts.deletedCardIds.length > 0) {
+          const placeholders = opts.deletedCardIds.map(() => '?').join(',')
+          db.prepare(
+            `UPDATE sync_state SET synced_deleted = 1, updated_at = ? WHERE card_id IN (${placeholders})`
+          ).run(now, ...opts.deletedCardIds)
+        }
+      })
+      tx()
+    })
+  }
+
+  async countPendingSync(): Promise<number> {
+    return this.enqueue(() => {
+      const db = this.mustDb()
+      const row = db
+        .prepare(
+          `SELECT
+             (SELECT COUNT(*) FROM sync_state
+              WHERE is_deleted = 0 AND (synced_hash IS NULL OR synced_hash <> content_hash))
+             +
+             (SELECT COUNT(*) FROM sync_state
+              WHERE is_deleted = 1 AND synced_deleted = 0) AS pending`
+        )
+        .get() as any
+      return Number(row?.pending ?? 0)
+    })
+  }
+
+  /** Forget all server acks (unpair) so a future pairing re-pushes everything. */
+  async resetSyncState(): Promise<void> {
+    await this.enqueue(() => {
+      const db = this.mustDb()
+      db.prepare('UPDATE sync_state SET synced_hash = NULL, synced_deleted = 0').run()
+    })
+  }
+
   async applyReviewRatingSegment(opts: {
     startTs: number
     endTs: number
@@ -1220,6 +1461,43 @@ export class StorageService {
 
     return normalizeRelPath(`recordings/screenshots/${dir}/${filename}`)
   }
+}
+
+/**
+ * Stable content hash over the synced card fields. Joined with an ASCII unit
+ * separator so field boundaries can't collide with field content.
+ */
+export function computeCardContentHash(fields: {
+  title: string
+  summary: string | null
+  detailedSummary: string | null
+  category: string
+  subcategory: string | null
+  startTs: number
+  endTs: number
+}): string {
+  const parts = [
+    fields.title ?? '',
+    fields.summary ?? '',
+    fields.detailedSummary ?? '',
+    fields.category ?? '',
+    fields.subcategory ?? '',
+    String(fields.startTs),
+    String(fields.endTs)
+  ]
+  return crypto.createHash('sha256').update(parts.join('\u001f'), 'utf8').digest('hex')
+}
+
+function contentHashForCardRow(r: any): string {
+  return computeCardContentHash({
+    title: String(r.title ?? ''),
+    summary: r.summary ?? null,
+    detailedSummary: r.detailed_summary ?? null,
+    category: String(r.category ?? ''),
+    subcategory: r.subcategory ?? null,
+    startTs: Number(r.start_ts),
+    endTs: Number(r.end_ts)
+  })
 }
 
 function clampInt(n: unknown, min: number, max: number): number {

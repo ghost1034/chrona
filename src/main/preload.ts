@@ -91,6 +91,12 @@ contextBridge.exposeInMainWorld('chrona', {
   getDashboardStats: (scope: { startTs: number; endTs: number }, options?: { includeSystem?: boolean }) =>
     invoke('dashboard:get', { scope, options }),
 
+  getSyncStatus: () => invoke('sync:getStatus', undefined),
+  pairSync: (req: IpcContract['sync:pair']['req']) => invoke('sync:pair', req),
+  unpairSync: () => invoke('sync:unpair', undefined),
+  runSyncNow: () => invoke('sync:runNow', undefined),
+  setSyncEnabled: (enabled: boolean) => invoke('sync:setEnabled', { enabled }),
+
   onRecordingStateChanged: (cb: (state: IpcContract['capture:getState']['res']) => void) => {
     const listener = (_event: unknown, payload: IpcContract['capture:getState']['res']) => cb(payload)
     ipcRenderer.on(IPC_EVENTS.recordingStateChanged, listener)
@@ -138,6 +144,12 @@ contextBridge.exposeInMainWorld('chrona', {
     ) => cb(payload)
     ipcRenderer.on(IPC_EVENTS.storageUsageUpdated, listener)
     return () => ipcRenderer.removeListener(IPC_EVENTS.storageUsageUpdated, listener)
+  },
+
+  onSyncStatusChanged: (cb: (status: IpcContract['sync:getStatus']['res']) => void) => {
+    const listener = (_event: unknown, payload: IpcContract['sync:getStatus']['res']) => cb(payload)
+    ipcRenderer.on(IPC_EVENTS.syncStatusChanged, listener)
+    return () => ipcRenderer.removeListener(IPC_EVENTS.syncStatusChanged, listener)
   },
 
   onNavigate: (cb: (payload: { view: string }) => void) => {
@@ -236,6 +248,12 @@ export type ChronaApi = {
     options?: { includeSystem?: boolean }
   ) => InvokeResult<'dashboard:get'>
 
+  getSyncStatus: () => InvokeResult<'sync:getStatus'>
+  pairSync: (req: IpcContract['sync:pair']['req']) => InvokeResult<'sync:pair'>
+  unpairSync: () => InvokeResult<'sync:unpair'>
+  runSyncNow: () => InvokeResult<'sync:runNow'>
+  setSyncEnabled: (enabled: boolean) => InvokeResult<'sync:setEnabled'>
+
   onRecordingStateChanged: (
     cb: (state: IpcContract['capture:getState']['res']) => void
   ) => () => void
@@ -252,6 +270,8 @@ export type ChronaApi = {
     recordingsLimitBytes: number
     timelapsesLimitBytes: number
   }) => void) => () => void
+
+  onSyncStatusChanged: (cb: (status: IpcContract['sync:getStatus']['res']) => void) => () => void
 
   onNavigate: (cb: (payload: { view: string }) => void) => () => void
 }

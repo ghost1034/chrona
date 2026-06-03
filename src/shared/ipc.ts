@@ -4,7 +4,7 @@ export type AppPingResponse = {
 }
 
 export type Settings = {
-  version: 8
+  version: 9
   captureIntervalSeconds: number
   captureSelectedDisplayId: string | null
   captureIncludeCursor: boolean
@@ -40,6 +40,11 @@ export type Settings = {
 
   onboardingVersion: number
   onboardingCompleted: boolean
+
+  // CPAAutomation sync
+  syncEnabled: boolean
+  syncEndpoint: string
+  syncIntervalSeconds: number
 }
 
 export type CaptureAccessStatus = 'granted' | 'denied' | 'unknown' | 'not_applicable'
@@ -343,6 +348,27 @@ export type IpcContract = {
     }
     res: import('./dashboard').DashboardStatsDTO
   }
+
+  'sync:getStatus': {
+    req: void
+    res: import('./sync').SyncStatusDTO
+  }
+  'sync:pair': {
+    req: { code: string; endpoint?: string }
+    res: import('./sync').SyncStatusDTO
+  }
+  'sync:unpair': {
+    req: void
+    res: import('./sync').SyncStatusDTO
+  }
+  'sync:runNow': {
+    req: void
+    res: import('./sync').SyncStatusDTO
+  }
+  'sync:setEnabled': {
+    req: { enabled: boolean }
+    res: import('./sync').SyncStatusDTO
+  }
 }
 
 export const IPC_CHANNELS = {
@@ -395,7 +421,12 @@ export const IPC_CHANNELS = {
   storagePurgeNow: 'storage:purgeNow',
   storageResolveFileUrl: 'storage:resolveFileUrl',
   askRun: 'ask:run',
-  dashboardGet: 'dashboard:get'
+  dashboardGet: 'dashboard:get',
+  syncGetStatus: 'sync:getStatus',
+  syncPair: 'sync:pair',
+  syncUnpair: 'sync:unpair',
+  syncRunNow: 'sync:runNow',
+  syncSetEnabled: 'sync:setEnabled'
 } as const
 
 export const IPC_EVENTS = {
@@ -404,6 +435,7 @@ export const IPC_EVENTS = {
   analysisBatchUpdated: 'event:analysisBatchUpdated',
   timelineUpdated: 'event:timelineUpdated',
   storageUsageUpdated: 'event:storageUsageUpdated',
+  syncStatusChanged: 'event:syncStatusChanged',
   navigate: 'event:navigate'
 } as const
 

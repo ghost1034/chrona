@@ -1,6 +1,6 @@
 import type Database from 'better-sqlite3'
 
-export const SCHEMA_VERSION = 3
+export const SCHEMA_VERSION = 4
 
 export function migrate(db: Database.Database) {
   const row = db.pragma('user_version', { simple: true }) as number
@@ -11,6 +11,7 @@ export function migrate(db: Database.Database) {
       applyV1(db)
       applyV2(db)
       applyV3(db)
+      applyV4(db)
       db.pragma(`user_version = ${SCHEMA_VERSION}`)
     })()
     return
@@ -20,6 +21,7 @@ export function migrate(db: Database.Database) {
     db.transaction(() => {
       applyV2(db)
       applyV3(db)
+      applyV4(db)
       db.pragma(`user_version = ${SCHEMA_VERSION}`)
     })()
     return
@@ -28,6 +30,15 @@ export function migrate(db: Database.Database) {
   if (currentVersion === 2) {
     db.transaction(() => {
       applyV3(db)
+      applyV4(db)
+      db.pragma(`user_version = ${SCHEMA_VERSION}`)
+    })()
+    return
+  }
+
+  if (currentVersion === 3) {
+    db.transaction(() => {
+      applyV4(db)
       db.pragma(`user_version = ${SCHEMA_VERSION}`)
     })()
     return
@@ -215,5 +226,29 @@ function applyV3(db: Database.Database) {
       id, title, summary, detailed_summary, metadata, category, subcategory
     FROM timeline_cards
     WHERE is_deleted = 0;
+  `)
+}
+
+function applyV4(db: Database.Database) {
+  // Sidecar sync-tracking for CPAAutomation sync.
+  // timeline_cards has no updated_at, so change detection is content-hash based:
+  // a card is dirty when synced_hash is NULL (never synced) or differs from
+  // content_hash (edited since last ack).
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS sync_state (
+      card_id        INTEGER PRIMARY KEY REFERENCES timeline_cards(id) ON DELETE CASCADE,
+      content_hash   TEXT NOT NULL,
+      synced_hash    TEXT,
+      is_deleted     INTEGER NOT NULL DEFAULT 0,
+      synced_deleted INTEGER NOT NULL DEFAULT 0,
+      updated_at     INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_sync_state_dirty ON sync_state(card_id)
+      WHERE synced_hash IS NULL OR synced_hash <> content_hash;
+
+    CREATE TABLE IF NOT EXISTS sync_meta (
+      k TEXT PRIMARY KEY,
+      v TEXT
+    );
   `)
 }

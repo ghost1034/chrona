@@ -31,6 +31,7 @@ import type { DashboardService } from './dashboard/dashboard'
 import type { JournalService } from './journal/journal'
 import { buildTimelineXlsxBuffer } from './export/timelineXlsx'
 import type { CategoriesService } from './categories/categories'
+import type { SyncService } from './sync/sync'
 
 type Handler<K extends keyof IpcContract> = (
   req: IpcContract[K]['req']
@@ -46,6 +47,7 @@ export function registerIpc(opts: {
   dashboard: DashboardService
   journal: JournalService
   categories: CategoriesService
+  sync: SyncService
   log: Logger
 }) {
   const gemini = new GeminiService({ storage: opts.storage, log: opts.log, settings: opts.settings })
@@ -121,6 +123,10 @@ export function registerIpc(opts: {
     // Only reschedule analysis loop when interval changes.
     if (patch && Object.prototype.hasOwnProperty.call(patch, 'analysisCheckIntervalSeconds')) {
       opts.analysis.rescheduleFromSettings()
+    }
+
+    if (patch && Object.prototype.hasOwnProperty.call(patch, 'syncIntervalSeconds')) {
+      opts.sync.rescheduleFromSettings()
     }
 
     return next
@@ -252,6 +258,9 @@ export function registerIpc(opts: {
       category: req.category,
       subcategory: req.subcategory ?? null
     })
+    // In-place edits don't bump any timestamp on timeline_cards — tell the
+    // sync engine directly so the change syncs without waiting an hour.
+    opts.sync.notifyCardEdited(req.cardId)
     return { ok: true }
   })
 
@@ -493,6 +502,14 @@ export function registerIpc(opts: {
       includeSystem: !!req.options?.includeSystem
     })
   })
+
+  handle('sync:getStatus', async () => opts.sync.getStatus())
+  handle('sync:pair', async (req) =>
+    opts.sync.pair({ code: req.code, endpoint: req.endpoint })
+  )
+  handle('sync:unpair', async () => opts.sync.unpair())
+  handle('sync:runNow', async () => opts.sync.runNow())
+  handle('sync:setEnabled', async (req) => opts.sync.setEnabled(!!req.enabled))
 }
 
 function mapCardRow(r: any) {
