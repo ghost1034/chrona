@@ -92,3 +92,42 @@ jobs:
           fail_on_unmatched_files: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Update stable tag + release
+        if: github.ref_name == 'main'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CI_TAG: ${{ steps.meta.outputs.tag }}
+        run: |
+          set -euo pipefail
+
+          # Move the stable tag to the commit just built
+          git tag -f stable "$GITHUB_SHA"
+          git push --force origin refs/tags/stable
+
+          mapfile -t files < <(find release-assets -type f | sort)
+
+          if ! gh release view stable --json name >/dev/null 2>&1; then
+            gh release create stable \
+              --title "Stable" \
+              --notes "Stable build from \`main\` @ ${GITHUB_SHA::7} (mirrors \`$CI_TAG\`)." \
+              --latest \
+              "${files[@]}"
+            exit 0
+          fi
+
+          # Replace assets with this build's, then drop any stale leftovers
+          gh release upload stable --clobber "${files[@]}"
+
+          new_names=$(printf '%s\n' "${files[@]}" | xargs -n1 basename)
+          gh release view stable --json assets -q '.assets[].name' | while read -r asset; do
+            if ! grep -qxF "$asset" <<<"$new_names"; then
+              gh release delete-asset stable "$asset" -y
+            fi
+          done
+
+          gh release edit stable \
+            --title "Stable" \
+            --notes "Stable build from \`main\` @ ${GITHUB_SHA::7} (mirrors \`$CI_TAG\`)." \
+            --latest
