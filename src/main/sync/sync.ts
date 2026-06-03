@@ -1,7 +1,7 @@
 import type { Logger } from '../logger'
 import type { SettingsStore } from '../settings'
 import type { StorageService, SyncCardRow } from '../storage/storage'
-import type { SyncStatusDTO } from '../../shared/sync'
+import { DEFAULT_SYNC_ENDPOINT, type SyncStatusDTO } from '../../shared/sync'
 import { deleteDeviceToken, getDeviceToken, setDeviceToken } from './deviceToken'
 import { SyncClient, SyncHttpError, normalizeEndpoint, type SyncCardPayload } from './syncClient'
 
@@ -126,7 +126,7 @@ export class SyncService {
   async getStatus(): Promise<SyncStatusDTO> {
     const s = await this.settings.getAll()
     this.cachedEnabled = !!s.syncEnabled
-    this.cachedEndpoint = s.syncEndpoint ?? ''
+    this.cachedEndpoint = resolveEndpoint(s.syncEndpoint)
     this.pendingCount = await this.storage.countPendingSync().catch(() => this.pendingCount)
     return this.snapshot()
   }
@@ -144,9 +144,9 @@ export class SyncService {
     }
 
     const s = await this.settings.getAll()
-    if (!s.syncEndpoint) throw new Error('Sync server URL is required')
+    const endpoint = resolveEndpoint(s.syncEndpoint)
 
-    const client = new SyncClient({ endpoint: s.syncEndpoint })
+    const client = new SyncClient({ endpoint })
     const res = await client.pair({
       code,
       platform: this.platform,
@@ -166,7 +166,7 @@ export class SyncService {
 
     await this.settings.update({ syncEnabled: true })
     this.cachedEnabled = true
-    this.cachedEndpoint = s.syncEndpoint
+    this.cachedEndpoint = endpoint
     this.lastError = null
     this.consecutiveFailures = 0
     this.clearRetry()
@@ -286,10 +286,11 @@ export class SyncService {
 
   private async tickOnce(opts?: { heartbeat?: boolean; fullReconcile?: boolean }): Promise<void> {
     const s = await this.settings.getAll()
+    const endpoint = resolveEndpoint(s.syncEndpoint)
     this.cachedEnabled = !!s.syncEnabled
-    this.cachedEndpoint = s.syncEndpoint ?? ''
+    this.cachedEndpoint = endpoint
 
-    if (!this.token || !s.syncEnabled || !s.syncEndpoint) return
+    if (!this.token || !s.syncEnabled) return
 
     this.syncing = true
     this.emitStatus()
@@ -303,7 +304,7 @@ export class SyncService {
       await this.storage.reconcileSyncState({ full })
       if (full) await this.storage.setSyncMeta(META_LAST_FULL_RECONCILE_TS, String(nowSec))
 
-      const client = new SyncClient({ endpoint: s.syncEndpoint })
+      const client = new SyncClient({ endpoint })
       const token = this.token
       let sentAnything = false
 
@@ -387,6 +388,11 @@ export class SyncService {
       // never let a renderer notification break the sync loop
     }
   }
+}
+
+/** Empty/unset syncEndpoint means CPAAutomation's production API. */
+function resolveEndpoint(syncEndpoint: string | undefined): string {
+  return syncEndpoint?.trim() || DEFAULT_SYNC_ENDPOINT
 }
 
 function toSyncCardPayload(c: SyncCardRow): SyncCardPayload {

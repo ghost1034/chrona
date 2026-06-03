@@ -69,6 +69,8 @@ const DEFAULT_SETTINGS: Settings = {
   onboardingCompleted: false,
 
   syncEnabled: false,
+  // Empty means CPAAutomation's production API (DEFAULT_SYNC_ENDPOINT);
+  // hand-edit settings.json to point at a dev server instead.
   syncEndpoint: '',
   syncIntervalSeconds: 300
 }

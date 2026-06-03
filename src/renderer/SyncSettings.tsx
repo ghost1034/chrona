@@ -8,7 +8,6 @@ import type { SyncStatusDTO } from '../shared/sync'
  */
 export function SyncSettings() {
   const [status, setStatus] = useState<SyncStatusDTO | null>(null)
-  const [endpointDraft, setEndpointDraft] = useState<string>('')
   const [codeDraft, setCodeDraft] = useState<string>('')
   const [intervalDraft, setIntervalDraft] = useState<string>('')
   const [busy, setBusy] = useState<boolean>(false)
@@ -26,7 +25,6 @@ export function SyncSettings() {
         ])
         if (cancelled) return
         setStatus(st)
-        setEndpointDraft(st.endpoint || settings.syncEndpoint || '')
         setIntervalDraft(String(settings.syncIntervalSeconds ?? 300))
       } catch (e) {
         if (!cancelled) setError(e instanceof Error ? e.message : String(e))
@@ -100,17 +98,6 @@ export function SyncSettings() {
             within 15 minutes.
           </div>
           <div className="row">
-            <label className="label" style={{ flex: 1 }}>
-              Server URL
-              <input
-                className="input"
-                value={endpointDraft}
-                onChange={(e) => setEndpointDraft(e.target.value)}
-                placeholder="https://app.example.com"
-              />
-            </label>
-          </div>
-          <div className="row">
             <label className="label">
               Pairing code
               <input
@@ -123,13 +110,10 @@ export function SyncSettings() {
             </label>
             <button
               className="btn btn-accent"
-              disabled={busy || !endpointDraft.trim() || !codeDraft.trim()}
+              disabled={busy || !codeDraft.trim()}
               onClick={() =>
                 run(async () => {
-                  const st = await window.chrona.pairSync({
-                    code: codeDraft.trim(),
-                    endpoint: endpointDraft.trim()
-                  })
+                  const st = await window.chrona.pairSync({ code: codeDraft.trim() })
                   setCodeDraft('')
                   return st
                 })
