@@ -120,7 +120,8 @@ jobs:
           # Replace assets with this build's, then drop any stale leftovers
           gh release upload stable --clobber "${files[@]}"
 
-          new_names=$(printf '%s\n' "${files[@]}" | xargs -n1 basename)
+          # GitHub replaces spaces in asset names with dots; mirror that when comparing
+          new_names=$(printf '%s\n' "${files[@]}" | sed -e 's|.*/||' -e 's/ /./g')
           gh release view stable --json assets -q '.assets[].name' | while read -r asset; do
             if ! grep -qxF "$asset" <<<"$new_names"; then
               gh release delete-asset stable "$asset" -y
