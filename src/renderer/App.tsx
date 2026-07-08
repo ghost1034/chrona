@@ -62,7 +62,7 @@ export function App() {
 
   const [timelapseFps, setTimelapseFps] = useState<number>(2)
 
-  const [geminiModel, setGeminiModel] = useState<string>('gemini-3-flash-preview')
+  const [geminiModel, setGeminiModel] = useState<string>('gemini-3.5-flash')
   const [geminiRequestTimeoutMs, setGeminiRequestTimeoutMs] = useState<number>(60_000)
   const [geminiMaxAttempts, setGeminiMaxAttempts] = useState<number>(3)
   const [geminiLogBodies, setGeminiLogBodies] = useState<boolean>(false)
@@ -286,7 +286,7 @@ export function App() {
         String(Math.round(Number((settings as any).analysisCardWindowLookbackSec ?? 60 * 60) / 60))
       )
 
-      setGeminiModel(String((settings as any).geminiModel ?? 'gemini-3-flash-preview'))
+      setGeminiModel(String((settings as any).geminiModel ?? 'gemini-3.5-flash'))
       setGeminiRequestTimeoutMs(Number((settings as any).geminiRequestTimeoutMs ?? 60_000) || 60_000)
       setGeminiMaxAttempts(Number((settings as any).geminiMaxAttempts ?? 3) || 3)
       setGeminiLogBodies(!!(settings as any).geminiLogBodies)
@@ -779,7 +779,7 @@ export function App() {
   async function onSaveGeminiRuntime() {
     const timeoutMs = Math.max(1000, Math.floor(Number(geminiRequestTimeoutMs)))
     const attempts = Math.max(1, Math.floor(Number(geminiMaxAttempts)))
-    const model = String(geminiModel || '').trim() || 'gemini-3-flash-preview'
+    const model = String(geminiModel || '').trim() || 'gemini-3.5-flash'
     setGeminiModel(model)
     setGeminiRequestTimeoutMs(timeoutMs)
     setGeminiMaxAttempts(attempts)
