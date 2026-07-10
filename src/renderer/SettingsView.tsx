@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { formatBytes } from '../shared/format'
 import type { CategoryDefinition, SubcategoryDefinition } from '../shared/categories'
 import { SyncSettings } from './SyncSettings'
+import { BlurSettings } from './BlurSettings'
 
 const GEMINI_MODELS = [
   'gemini-3.5-flash',
@@ -279,6 +280,8 @@ export function SettingsView(props: {
                 </label>
               </div>
             </div>
+
+            <BlurSettings displays={props.displays} />
           </div>
         ) : null}
 

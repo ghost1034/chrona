@@ -4,10 +4,15 @@ export type AppPingResponse = {
 }
 
 export type Settings = {
-  version: 9
+  version: 10
   captureIntervalSeconds: number
   captureSelectedDisplayId: string | null
   captureIncludeCursor: boolean
+
+  // Privacy: regions redacted from captures before anything is written to disk.
+  blurRegions: import('./blurRegions').BlurRegion[]
+  // Electron accelerator that opens the blur overlay; '' disables the shortcut.
+  blurHotkey: string
 
   // Timeline taxonomy
   categories: import('./categories').CategoryDefinition[]
@@ -369,6 +374,35 @@ export type IpcContract = {
     req: { enabled: boolean }
     res: import('./sync').SyncStatusDTO
   }
+
+  'blur:listRegions': {
+    req: void
+    res: { regions: import('./blurRegions').BlurRegion[] }
+  }
+  'blur:addRegion': {
+    req: {
+      displayId: string
+      rect: import('./blurRegions').NormalizedRect
+      label?: string
+    }
+    res: { region: import('./blurRegions').BlurRegion }
+  }
+  'blur:removeRegion': {
+    req: { id: string }
+    res: { ok: true }
+  }
+  'blur:openOverlay': {
+    req: void
+    res: { ok: true }
+  }
+  'blur:closeOverlay': {
+    req: void
+    res: { ok: true }
+  }
+  'blur:setHotkey': {
+    req: { accelerator: string }
+    res: { ok: boolean; message: string | null }
+  }
 }
 
 export const IPC_CHANNELS = {
@@ -426,7 +460,13 @@ export const IPC_CHANNELS = {
   syncPair: 'sync:pair',
   syncUnpair: 'sync:unpair',
   syncRunNow: 'sync:runNow',
-  syncSetEnabled: 'sync:setEnabled'
+  syncSetEnabled: 'sync:setEnabled',
+  blurListRegions: 'blur:listRegions',
+  blurAddRegion: 'blur:addRegion',
+  blurRemoveRegion: 'blur:removeRegion',
+  blurOpenOverlay: 'blur:openOverlay',
+  blurCloseOverlay: 'blur:closeOverlay',
+  blurSetHotkey: 'blur:setHotkey'
 } as const
 
 export const IPC_EVENTS = {
@@ -436,6 +476,7 @@ export const IPC_EVENTS = {
   timelineUpdated: 'event:timelineUpdated',
   storageUsageUpdated: 'event:storageUsageUpdated',
   syncStatusChanged: 'event:syncStatusChanged',
+  blurRegionsChanged: 'event:blurRegionsChanged',
   navigate: 'event:navigate'
 } as const
 

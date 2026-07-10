@@ -3,6 +3,7 @@ import { desktopCapturer, powerMonitor, screen } from 'electron'
 import type { Logger } from '../logger'
 import type { SettingsStore } from '../settings'
 import type { StorageService } from '../storage/storage'
+import { applyBlurRegions } from './redact'
 
 type EventSink = {
   recordingStateChanged: (state: CaptureState) => void
@@ -272,14 +273,22 @@ export class CaptureService {
       throw new Error('Capture looks blank/black (Screen Recording permission?)')
     }
 
-    const jpegBytes = img.toJPEG(85)
+    // display_id can be empty on some platforms; fall back to the resolved id.
+    const captureDisplayId = String(source.display_id || '') || displayId
+    const currentSettings = await this.settings.getAll()
+    const regions = currentSettings.blurRegions.filter((r) => r.displayId === captureDisplayId)
+    // Throws on any redaction inconsistency => frame is dropped, never saved unredacted.
+    const redacted = applyBlurRegions(img, regions)
+
+    const jpegBytes = redacted.toJPEG(85)
     await this.storage.saveScreenshotJpeg({ capturedAtMs, jpegBytes })
 
     this.lastCaptureTs = Math.floor(capturedAtMs / 1000)
     this.log.debug('capture.saved', {
       capturedAtMs,
       displayId: this.resolvedDisplayId,
-      bytes: jpegBytes.byteLength
+      bytes: jpegBytes.byteLength,
+      redactedRegionCount: regions.length
     })
   }
 

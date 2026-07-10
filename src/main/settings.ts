@@ -1,12 +1,17 @@
 import fs from 'node:fs/promises'
 import path from 'node:path'
+import { DEFAULT_BLUR_HOTKEY, isValidNormalizedRect } from '../shared/blurRegions'
+import type { BlurRegion } from '../shared/blurRegions'
 import type { Settings } from '../shared/ipc'
 
 const DEFAULT_SETTINGS: Settings = {
-  version: 9,
+  version: 10,
   captureIntervalSeconds: 10,
   captureSelectedDisplayId: null,
   captureIncludeCursor: false,
+
+  blurRegions: [],
+  blurHotkey: DEFAULT_BLUR_HOTKEY,
 
   categories: [
     {
@@ -75,6 +80,20 @@ const DEFAULT_SETTINGS: Settings = {
   syncIntervalSeconds: 300
 }
 
+// Drops malformed entries individually so one corrupted region can never
+// disable redaction of the others.
+function sanitizeBlurRegions(value: unknown): BlurRegion[] {
+  if (!Array.isArray(value)) return []
+  return value.filter(
+    (r): r is BlurRegion =>
+      !!r &&
+      typeof r === 'object' &&
+      typeof (r as any).id === 'string' &&
+      typeof (r as any).displayId === 'string' &&
+      isValidNormalizedRect((r as any).rect)
+  )
+}
+
 export class SettingsStore {
   private readonly filePath: string
 
@@ -99,20 +118,24 @@ export class SettingsStore {
         parsed?.version !== 6 &&
         parsed?.version !== 7 &&
         parsed?.version !== 8 &&
-        parsed?.version !== 9
+        parsed?.version !== 9 &&
+        parsed?.version !== 10
       ) {
         return DEFAULT_SETTINGS
       }
 
       // Migration: do not force onboarding UI for existing users.
       const fromExistingUser = parsed?.version <= 5
-      const merged: Settings = { ...DEFAULT_SETTINGS, ...parsed, version: 9 }
+      const merged: Settings = { ...DEFAULT_SETTINGS, ...parsed, version: 10 }
       if (fromExistingUser && typeof (parsed as any).onboardingCompleted !== 'boolean') {
         merged.onboardingCompleted = true
       }
       if (fromExistingUser && typeof (parsed as any).onboardingVersion !== 'number') {
         merged.onboardingVersion = 1
       }
+
+      merged.blurRegions = sanitizeBlurRegions(merged.blurRegions)
+      if (typeof merged.blurHotkey !== 'string') merged.blurHotkey = DEFAULT_BLUR_HOTKEY
 
       return merged
     } catch {
@@ -125,7 +148,7 @@ export class SettingsStore {
     const next: Settings = {
       ...current,
       ...patch,
-      version: 9
+      version: 10
     }
 
     await fs.mkdir(path.dirname(this.filePath), { recursive: true })

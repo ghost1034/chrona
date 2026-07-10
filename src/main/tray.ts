@@ -6,6 +6,7 @@ export function createTray(opts: {
   onToggleRecording: (enabled: boolean) => void
   onOpenRecordingsFolder: () => void
   onOpenSettings: () => void
+  onOpenBlurOverlay: () => void
   onOpenSetup: () => void
   onOpen: () => void
   onQuit: () => void
@@ -31,6 +32,7 @@ function buildTemplate(
     onToggleRecording: (enabled: boolean) => void
     onOpenRecordingsFolder: () => void
     onOpenSettings: () => void
+    onOpenBlurOverlay: () => void
     onOpenSetup: () => void
     onOpen: () => void
     onQuit: () => void
@@ -65,6 +67,10 @@ function buildTemplate(
     {
       label: 'Settings…',
       click: () => opts.onOpenSettings()
+    },
+    {
+      label: 'Blur an Area…',
+      click: () => opts.onOpenBlurOverlay()
     },
     {
       label: 'Open Recordings Folder',

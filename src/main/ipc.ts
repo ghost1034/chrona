@@ -32,6 +32,7 @@ import type { JournalService } from './journal/journal'
 import { buildTimelineXlsxBuffer } from './export/timelineXlsx'
 import type { CategoriesService } from './categories/categories'
 import type { SyncService } from './sync/sync'
+import type { BlurService } from './blur/blur'
 
 type Handler<K extends keyof IpcContract> = (
   req: IpcContract[K]['req']
@@ -48,6 +49,7 @@ export function registerIpc(opts: {
   journal: JournalService
   categories: CategoriesService
   sync: SyncService
+  blur: BlurService
   log: Logger
 }) {
   const gemini = new GeminiService({ storage: opts.storage, log: opts.log, settings: opts.settings })
@@ -510,6 +512,22 @@ export function registerIpc(opts: {
   handle('sync:unpair', async () => opts.sync.unpair())
   handle('sync:runNow', async () => opts.sync.runNow())
   handle('sync:setEnabled', async (req) => opts.sync.setEnabled(!!req.enabled))
+
+  handle('blur:listRegions', async () => ({ regions: await opts.blur.listRegions() }))
+  handle('blur:addRegion', async (req) => ({ region: await opts.blur.addRegion(req) }))
+  handle('blur:removeRegion', async (req) => {
+    await opts.blur.removeRegion(req.id)
+    return { ok: true }
+  })
+  handle('blur:openOverlay', async () => {
+    await opts.blur.openOverlays()
+    return { ok: true }
+  })
+  handle('blur:closeOverlay', async () => {
+    opts.blur.closeOverlays()
+    return { ok: true }
+  })
+  handle('blur:setHotkey', async (req) => opts.blur.setHotkey(req.accelerator))
 }
 
 function mapCardRow(r: any) {

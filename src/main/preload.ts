@@ -97,6 +97,13 @@ contextBridge.exposeInMainWorld('chrona', {
   runSyncNow: () => invoke('sync:runNow', undefined),
   setSyncEnabled: (enabled: boolean) => invoke('sync:setEnabled', { enabled }),
 
+  listBlurRegions: () => invoke('blur:listRegions', undefined),
+  addBlurRegion: (req: IpcContract['blur:addRegion']['req']) => invoke('blur:addRegion', req),
+  removeBlurRegion: (id: string) => invoke('blur:removeRegion', { id }),
+  openBlurOverlay: () => invoke('blur:openOverlay', undefined),
+  closeBlurOverlay: () => invoke('blur:closeOverlay', undefined),
+  setBlurHotkey: (accelerator: string) => invoke('blur:setHotkey', { accelerator }),
+
   onRecordingStateChanged: (cb: (state: IpcContract['capture:getState']['res']) => void) => {
     const listener = (_event: unknown, payload: IpcContract['capture:getState']['res']) => cb(payload)
     ipcRenderer.on(IPC_EVENTS.recordingStateChanged, listener)
@@ -150,6 +157,12 @@ contextBridge.exposeInMainWorld('chrona', {
     const listener = (_event: unknown, payload: IpcContract['sync:getStatus']['res']) => cb(payload)
     ipcRenderer.on(IPC_EVENTS.syncStatusChanged, listener)
     return () => ipcRenderer.removeListener(IPC_EVENTS.syncStatusChanged, listener)
+  },
+
+  onBlurRegionsChanged: (cb: () => void) => {
+    const listener = () => cb()
+    ipcRenderer.on(IPC_EVENTS.blurRegionsChanged, listener)
+    return () => ipcRenderer.removeListener(IPC_EVENTS.blurRegionsChanged, listener)
   },
 
   onNavigate: (cb: (payload: { view: string }) => void) => {
@@ -254,6 +267,13 @@ export type ChronaApi = {
   runSyncNow: () => InvokeResult<'sync:runNow'>
   setSyncEnabled: (enabled: boolean) => InvokeResult<'sync:setEnabled'>
 
+  listBlurRegions: () => InvokeResult<'blur:listRegions'>
+  addBlurRegion: (req: IpcContract['blur:addRegion']['req']) => InvokeResult<'blur:addRegion'>
+  removeBlurRegion: (id: string) => InvokeResult<'blur:removeRegion'>
+  openBlurOverlay: () => InvokeResult<'blur:openOverlay'>
+  closeBlurOverlay: () => InvokeResult<'blur:closeOverlay'>
+  setBlurHotkey: (accelerator: string) => InvokeResult<'blur:setHotkey'>
+
   onRecordingStateChanged: (
     cb: (state: IpcContract['capture:getState']['res']) => void
   ) => () => void
@@ -272,6 +292,8 @@ export type ChronaApi = {
   }) => void) => () => void
 
   onSyncStatusChanged: (cb: (status: IpcContract['sync:getStatus']['res']) => void) => () => void
+
+  onBlurRegionsChanged: (cb: () => void) => () => void
 
   onNavigate: (cb: (payload: { view: string }) => void) => () => void
 }

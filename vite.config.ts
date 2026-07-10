@@ -1,3 +1,4 @@
+import path from 'node:path'
 import react from '@vitejs/plugin-react'
 import { defineConfig } from 'vite'
 
@@ -13,6 +14,12 @@ export default defineConfig(({ command }) => ({
   },
   build: {
     outDir: '../../dist/renderer',
-    emptyOutDir: true
+    emptyOutDir: true,
+    rollupOptions: {
+      input: {
+        index: path.resolve(__dirname, 'src/renderer/index.html'),
+        overlay: path.resolve(__dirname, 'src/renderer/overlay.html')
+      }
+    }
   }
 }))

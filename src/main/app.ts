@@ -1,5 +1,5 @@
 import type { BrowserWindow } from 'electron'
-import { app, shell } from 'electron'
+import { app, globalShortcut, shell } from 'electron'
 import { createTray } from './tray'
 import { createMainWindow } from './window'
 import { registerIpc } from './ipc'
@@ -19,6 +19,7 @@ import { DashboardService } from './dashboard/dashboard'
 import { JournalService } from './journal/journal'
 import { CategoriesService } from './categories/categories'
 import { SyncService } from './sync/sync'
+import { BlurService } from './blur/blur'
 
 let quitting = false
 let mainWindow: BrowserWindow | null = null
@@ -116,6 +117,20 @@ async function main() {
     }
   })
   await capture.init()
+
+  const blur = new BlurService({
+    settings,
+    log,
+    events: {
+      blurRegionsChanged: () => {
+        win.webContents.send(IPC_EVENTS.blurRegionsChanged)
+      }
+    }
+  })
+  await blur.refreshHotkey()
+  app.on('will-quit', () => {
+    globalShortcut.unregisterAll()
+  })
 
   const deepLinks = new DeepLinkService({
     log,
@@ -215,7 +230,7 @@ async function main() {
   const journal = new JournalService({ storage, log, settings })
   const categories = new CategoriesService({ settings, storage })
 
-  registerIpc({ settings, capture, storage, analysis, retention, ask, dashboard, journal, categories, sync, log })
+  registerIpc({ settings, capture, storage, analysis, retention, ask, dashboard, journal, categories, sync, blur, log })
 
   win.webContents.on('render-process-gone', (_event, details) => {
     log.error('renderer.gone', { reason: details.reason, exitCode: details.exitCode })
@@ -240,6 +255,9 @@ async function main() {
       win.show()
       win.focus()
       win.webContents.send(IPC_EVENTS.navigate, { view: 'settings' })
+    },
+    onOpenBlurOverlay: () => {
+      void blur.openOverlays()
     },
     onOpenSetup: () => {
       win.show()
