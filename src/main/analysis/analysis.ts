@@ -332,11 +332,11 @@ export class AnalysisService {
       }))
     })
 
-    // Clean up any old timelapses from replaced cards.
+    // Clean up any old timelapses from replaced or trimmed cards.
     void this.timelapse.deleteTimelapseFiles(replaceRes.removedVideoPaths)
 
-    // Generate timelapses asynchronously for new cards.
-    this.timelapse.enqueueCardIds(replaceRes.insertedCardIds)
+    // Generate timelapses asynchronously for new cards and trimmed remnants.
+    this.timelapse.enqueueCardIds([...replaceRes.insertedCardIds, ...replaceRes.trimmedCardIds])
 
     this.emitTimelineUpdatedForRange(windowStartTs, windowEndTs)
 
@@ -370,6 +370,7 @@ export class AnalysisService {
     })
 
     void this.timelapse.deleteTimelapseFiles(replaceRes.removedVideoPaths)
+    this.timelapse.enqueueCardIds(replaceRes.trimmedCardIds)
 
     this.emitTimelineUpdatedForRange(batch.batchStartTs, batch.batchEndTs)
   }

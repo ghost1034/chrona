@@ -677,40 +677,36 @@ export class StorageService {
     toTs: number
     batchId: number
     newCards: TimelineCardInsert[]
-  }): Promise<{ insertedCardIds: number[]; removedVideoPaths: string[] }> {
+  }): Promise<{
+    insertedCardIds: number[]
+    trimmedCardIds: number[]
+    removedVideoPaths: string[]
+  }> {
     return this.enqueue(() => {
       const db = this.mustDb()
       const tx = db.transaction(() => {
+        const newIntervals = mergeIntervals(
+          opts.newCards
+            .filter((c) => Number.isFinite(c.startTs) && Number.isFinite(c.endTs))
+            .map((c) => [Math.min(c.startTs, c.endTs), Math.max(c.startTs, c.endTs)] as Interval)
+            .filter(([s, e]) => e > s)
+        )
+
+        // New cards may extend outside [fromTs, toTs), so scan wide enough to
+        // catch every existing card any new card could touch.
+        const spanStart = Math.min(opts.fromTs, ...newIntervals.map(([s]) => s))
+        const spanEnd = Math.max(opts.toTs, ...newIntervals.map(([, e]) => e))
+
         const overlapping = db
           .prepare(
-            `SELECT id, category, batch_id, video_summary_url
+            `SELECT *
              FROM timeline_cards
              WHERE is_deleted = 0
                AND start_ts < ?
                AND end_ts > ?`
           )
-          .all(opts.toTs, opts.fromTs) as any[]
+          .all(spanEnd, spanStart) as any[]
 
-        const idsToDelete: number[] = []
-        const removedVideoPaths: string[] = []
-        for (const row of overlapping) {
-          const shouldDelete =
-            row.category !== 'System' ||
-            (row.category === 'System' && Number(row.batch_id) === opts.batchId)
-          if (!shouldDelete) continue
-
-          idsToDelete.push(Number(row.id))
-          if (row.video_summary_url) removedVideoPaths.push(String(row.video_summary_url))
-        }
-
-        if (idsToDelete.length > 0) {
-          const placeholders = idsToDelete.map(() => '?').join(',')
-          db.prepare(`UPDATE timeline_cards SET is_deleted = 1 WHERE id IN (${placeholders})`).run(
-            ...idsToDelete
-          )
-        }
-
-        const insertedCardIds: number[] = []
         const insert = db.prepare(`
           INSERT INTO timeline_cards (
             batch_id, start, end, start_ts, end_ts, day,
@@ -718,7 +714,79 @@ export class StorageService {
             metadata, video_summary_url
           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `)
+        const softDelete = db.prepare('UPDATE timeline_cards SET is_deleted = 1 WHERE id = ?')
+        const trim = db.prepare(`
+          UPDATE timeline_cards
+          SET start = ?, end = ?, start_ts = ?, end_ts = ?, day = ?, video_summary_url = NULL
+          WHERE id = ?
+        `)
 
+        const idsToDelete: number[] = []
+        const trimmedCardIds: number[] = []
+        const removedVideoPaths: string[] = []
+
+        for (const row of overlapping) {
+          const cardStart = Number(row.start_ts)
+          const cardEnd = Number(row.end_ts)
+
+          if (row.category === 'System') {
+            const inWindow = cardStart < opts.toTs && cardEnd > opts.fromTs
+            if (inWindow && Number(row.batch_id) === opts.batchId) {
+              idsToDelete.push(Number(row.id))
+              if (row.video_summary_url) removedVideoPaths.push(String(row.video_summary_url))
+            }
+            continue
+          }
+
+          const remnants = subtractIntervals([cardStart, cardEnd], newIntervals)
+          const untouched =
+            remnants.length === 1 && remnants[0][0] === cardStart && remnants[0][1] === cardEnd
+          if (untouched) continue
+
+          if (remnants.length === 0) {
+            idsToDelete.push(Number(row.id))
+            if (row.video_summary_url) removedVideoPaths.push(String(row.video_summary_url))
+            continue
+          }
+
+          // The card's timelapse covers its old range; drop it so it can be
+          // regenerated for the trimmed range.
+          if (row.video_summary_url) removedVideoPaths.push(String(row.video_summary_url))
+
+          const [firstStart, firstEnd] = remnants[0]
+          trim.run(
+            formatClockAscii(firstStart),
+            formatClockAscii(firstEnd),
+            firstStart,
+            firstEnd,
+            dayKeyFromUnixSeconds(firstStart),
+            Number(row.id)
+          )
+          trimmedCardIds.push(Number(row.id))
+
+          for (const [s, e] of remnants.slice(1)) {
+            const info = insert.run(
+              row.batch_id,
+              formatClockAscii(s),
+              formatClockAscii(e),
+              s,
+              e,
+              dayKeyFromUnixSeconds(s),
+              row.title,
+              row.summary ?? null,
+              row.category,
+              row.subcategory ?? null,
+              row.detailed_summary ?? null,
+              row.metadata ?? null,
+              null
+            )
+            trimmedCardIds.push(Number(info.lastInsertRowid))
+          }
+        }
+
+        for (const id of idsToDelete) softDelete.run(id)
+
+        const insertedCardIds: number[] = []
         for (const c of opts.newCards) {
           const startDisplay = c.startDisplay ?? formatClockAscii(c.startTs)
           const endDisplay = c.endDisplay ?? formatClockAscii(c.endTs)
@@ -741,7 +809,7 @@ export class StorageService {
           insertedCardIds.push(Number(info.lastInsertRowid))
         }
 
-        return { insertedCardIds, removedVideoPaths }
+        return { insertedCardIds, trimmedCardIds, removedVideoPaths }
       })
 
       return tx()
@@ -1504,6 +1572,35 @@ function clampInt(n: unknown, min: number, max: number): number {
   const x = Math.floor(Number(n))
   if (!Number.isFinite(x)) return min
   return Math.max(min, Math.min(max, x))
+}
+
+type Interval = [number, number]
+
+export function mergeIntervals(intervals: Interval[]): Interval[] {
+  if (intervals.length === 0) return []
+  const sorted = [...intervals].sort((a, b) => a[0] - b[0])
+  const out: Interval[] = [[sorted[0][0], sorted[0][1]]]
+  for (let i = 1; i < sorted.length; i++) {
+    const [s, e] = sorted[i]
+    const last = out[out.length - 1]
+    if (s <= last[1]) last[1] = Math.max(last[1], e)
+    else out.push([s, e])
+  }
+  return out
+}
+
+/** Parts of `span` not covered by `covered` (which must be merged/sorted). */
+export function subtractIntervals(span: Interval, covered: Interval[]): Interval[] {
+  const out: Interval[] = []
+  let cursor = span[0]
+  for (const [s, e] of covered) {
+    if (e <= span[0] || s >= span[1]) continue
+    if (s > cursor) out.push([cursor, s])
+    cursor = Math.max(cursor, e)
+    if (cursor >= span[1]) break
+  }
+  if (cursor < span[1]) out.push([cursor, span[1]])
+  return out
 }
 
 function toFtsQuery(q: string): string {
