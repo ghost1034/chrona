@@ -2343,11 +2343,10 @@ export function App() {
 
               <div className="field">
                 <div className="label">Subcategory</div>
-                <input
+                <select
                   className="input"
                   value={selectedCard.subcategory ?? ''}
                   disabled={selectedCard.category === 'System'}
-                  list={selectedCard.category === 'System' ? undefined : 'chrona-subcategory-suggestions'}
                   onChange={(e) => {
                     const subcategory = e.target.value || null
                     setCards((prev) =>
@@ -2359,14 +2358,22 @@ export function App() {
                       subcategory
                     })
                   }}
-                />
-                {selectedCard.category !== 'System' && subcategorySuggestionsForSelected.length > 0 ? (
-                  <datalist id="chrona-subcategory-suggestions">
-                    {subcategorySuggestionsForSelected.map((s) => (
-                      <option key={s} value={s} />
+                >
+                  <option value="">None</option>
+                  {[
+                    ...subcategorySuggestionsForSelected,
+                    selectedCard.subcategory &&
+                    !subcategorySuggestionsForSelected.includes(selectedCard.subcategory)
+                      ? selectedCard.subcategory
+                      : null
+                  ]
+                    .filter(Boolean)
+                    .map((subcategory) => (
+                      <option key={String(subcategory)} value={String(subcategory)}>
+                        {String(subcategory)}
+                      </option>
                     ))}
-                  </datalist>
-                ) : null}
+                </select>
               </div>
 
               {selectedCard.summary ? (
