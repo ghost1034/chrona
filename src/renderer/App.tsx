@@ -1242,8 +1242,9 @@ export function App() {
   return (
     <div className="app">
       <header className="header">
-        <div className="brand">
-          <div className="wordmark">Chrona</div>
+        <div className="brandCluster">
+          <div className="brand">
+            <div className="wordmark">Chrona</div>
             <div className="tagline">
               {view === 'onboarding'
                 ? 'Setup'
@@ -1258,6 +1259,17 @@ export function App() {
                         : `Timeline · ${dayKey}`}
             </div>
           </div>
+
+          <button
+            className={`btn recordingControl ${recording ? 'recordingControl-active' : ''}`}
+            onClick={onToggleRecording}
+            aria-pressed={recording}
+            title={recording ? 'Stop screen recording' : 'Start screen recording'}
+          >
+            <span className="recordingControlDot" aria-hidden="true" />
+            {recording ? 'Stop recording' : 'Start recording'}
+          </button>
+        </div>
 
         <div className="toolbar">
           <button

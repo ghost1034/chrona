@@ -62,6 +62,13 @@ textarea {
   justify-content: flex-end;
 }
 
+.brandCluster {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  flex: 0 0 auto;
+}
+
 .wordmark {
   font-size: 36px;
   font-weight: 700;
@@ -1111,6 +1118,46 @@ textarea {
 .btn-accent {
   border-color: rgba(255, 122, 24, 0.55);
   background: linear-gradient(180deg, rgba(255, 122, 24, 0.22), rgba(255, 122, 24, 0.12));
+}
+
+.recordingControl {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding-inline: 16px;
+  border-color: rgba(255, 122, 24, 0.72);
+  background: linear-gradient(180deg, rgba(255, 122, 24, 0.3), rgba(255, 122, 24, 0.16));
+  box-shadow: 0 0 0 1px rgba(255, 122, 24, 0.08), 0 6px 20px rgba(0, 0, 0, 0.2);
+  font-weight: 700;
+}
+
+.btn.recordingControl:hover {
+  border-color: rgba(255, 154, 80, 0.9);
+  background: linear-gradient(180deg, rgba(255, 122, 24, 0.38), rgba(255, 122, 24, 0.22));
+}
+
+.recordingControl-active {
+  border-color: rgba(255, 93, 93, 0.82);
+  background: linear-gradient(180deg, rgba(225, 64, 64, 0.34), rgba(190, 40, 40, 0.2));
+}
+
+.btn.recordingControl-active:hover {
+  border-color: rgba(255, 125, 125, 0.96);
+  background: linear-gradient(180deg, rgba(225, 64, 64, 0.44), rgba(190, 40, 40, 0.28));
+}
+
+.recordingControlDot {
+  width: 9px;
+  height: 9px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: #ff9a50;
+  box-shadow: 0 0 0 3px rgba(255, 122, 24, 0.15);
+}
+
+.recordingControl-active .recordingControlDot {
+  background: #ff6b6b;
+  box-shadow: 0 0 0 3px rgba(255, 93, 93, 0.16), 0 0 12px rgba(255, 93, 93, 0.55);
 }
 
 .btn:hover {
