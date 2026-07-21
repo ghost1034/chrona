@@ -135,7 +135,7 @@ export function DashboardView(props: {
   return (
     <div className="dashboardWrap">
       <div className="dashboardHeader">
-        <div className="dashboardTitle">Dashboard</div>
+        <div className="dashboardTitle">Insights</div>
         <div className="dashboardMeta">
           {loading ? 'Loading…' : error ? `Error: ${error}` : stats ? scopeLabel(preset, props.selectedDayKey, customStartDayKey, customEndDayKey) : '—'}
         </div>

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import type { SetupStatus } from '../shared/ipc'
 
-type StepId = 'welcome' | 'gemini' | 'capture' | 'ready'
+type StepId = 'privacy' | 'capture' | 'gemini' | 'ready'
 
 export function OnboardingView(props: {
   setupStatus: SetupStatus | null
@@ -13,12 +13,7 @@ export function OnboardingView(props: {
 }) {
   const isMac = props.setupStatus?.platform === 'darwin'
 
-  const steps = useMemo(() => {
-    const base: StepId[] = ['welcome', 'gemini']
-    if (isMac) base.push('capture')
-    base.push('ready')
-    return base
-  }, [isMac])
+  const steps = useMemo<StepId[]>(() => ['privacy', 'capture', 'gemini', 'ready'], [])
 
   const [stepIndex, setStepIndex] = useState<number>(0)
   const step = steps[Math.max(0, Math.min(steps.length - 1, stepIndex))]!
@@ -100,26 +95,26 @@ export function OnboardingView(props: {
           </div>
         </div>
 
-        {step === 'welcome' ? (
+        {step === 'privacy' ? (
           <div className="onboardingBody">
+            <div className="eyebrow">Private by design</div>
+            <div className="onboardingStepTitle">Understand where your time goes.</div>
             <div className="onboardingLead">
-              Chrona captures periodic screenshots and generates a timeline of your activities.
+              Chrona turns periodic screen captures into a clear, searchable timeline—so you can reflect without tracking every task by hand.
             </div>
             <div className="onboardingList">
-              <div className="row">
-                <div className="pill">Local-first</div>
-                <div className="sideMeta">Screenshots and the database live on your machine.</div>
+              <div className="onboardingPromise">
+                <span aria-hidden="true">✓</span>
+                <div><strong>Your data stays local</strong><small>Screenshots and your timeline live on this computer.</small></div>
               </div>
-              <div className="row">
-                <div className="pill">Gemini</div>
-                <div className="sideMeta">Used for transcription and timeline cards.</div>
+              <div className="onboardingPromise">
+                <span aria-hidden="true">✓</span>
+                <div><strong>You control capture</strong><small>Pause at any time and blur sensitive areas before they are saved.</small></div>
               </div>
-              {isMac ? (
-                <div className="row">
-                  <div className="pill">macOS permission</div>
-                  <div className="sideMeta">Screen Recording permission is required to capture.</div>
-                </div>
-              ) : null}
+              <div className="onboardingPromise">
+                <span aria-hidden="true">✓</span>
+                <div><strong>AI is optional</strong><small>Add your own Gemini key for summaries, Ask, and journal drafts.</small></div>
+              </div>
             </div>
           </div>
         ) : null}
@@ -173,17 +168,19 @@ export function OnboardingView(props: {
 
         {step === 'capture' ? (
           <div className="onboardingBody">
-            <div className="sideTitle">macOS Screen Recording permission</div>
+            <div className="eyebrow">Capture permission</div>
+            <div className="onboardingStepTitle">Let Chrona observe your work.</div>
+            <div className="sideTitle">{isMac ? 'macOS Screen Recording permission' : 'Screen capture access'}</div>
             <div className="sideMeta">
-              Status: {captureStatus === 'granted' ? 'granted' : captureStatus === 'denied' ? 'missing' : 'unknown'}
+              Status: {!isMac ? 'available' : captureStatus === 'granted' ? 'granted' : captureStatus === 'denied' ? 'missing' : 'unknown'}
               {captureMessage ? ` · ${captureMessage}` : ''}
             </div>
 
-            <div className="sideMeta" style={{ marginTop: 10 }}>
+            {isMac ? <div className="sideMeta" style={{ marginTop: 10 }}>
               In System Settings: Privacy &amp; Security → Screen Recording → enable Chrona.
-            </div>
+            </div> : <div className="sideMeta" style={{ marginTop: 10 }}>Windows will ask for access when Chrona begins capturing. You remain in control from the app or tray.</div>}
 
-            <div className="row" style={{ marginTop: 10 }}>
+            {isMac ? <div className="row" style={{ marginTop: 10 }}>
               <button
                 className="btn"
                 disabled={busy}
@@ -197,11 +194,11 @@ export function OnboardingView(props: {
               <button className="btn" disabled={busy} onClick={() => void window.chrona.relaunch()}>
                 Relaunch Chrona
               </button>
-            </div>
+            </div> : null}
 
-            <div className="sideMeta" style={{ marginTop: 12 }}>
+            {isMac ? <div className="sideMeta" style={{ marginTop: 12 }}>
               After enabling permission, macOS may require a relaunch for capture to work.
-            </div>
+            </div> : null}
           </div>
         ) : null}
 

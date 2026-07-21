@@ -254,7 +254,10 @@ async function main() {
     onOpenSettings: () => {
       win.show()
       win.focus()
-      win.webContents.send(IPC_EVENTS.navigate, { view: 'settings' })
+      win.webContents.send(IPC_EVENTS.navigate, {
+        target: { name: 'settings', section: 'general' },
+        view: 'settings'
+      })
     },
     onOpenBlurOverlay: () => {
       void blur.openOverlays()
@@ -262,7 +265,7 @@ async function main() {
     onOpenSetup: () => {
       win.show()
       win.focus()
-      win.webContents.send(IPC_EVENTS.navigate, { view: 'onboarding' })
+      win.webContents.send(IPC_EVENTS.navigate, { target: { name: 'onboarding' }, view: 'onboarding' })
     },
     onOpen: () => {
       win.show()
