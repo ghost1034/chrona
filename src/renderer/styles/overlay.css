@@ -1,0 +1,9 @@
+@import '@fontsource-variable/ibm-plex-sans';
+
+.blurOverlay { position: fixed; inset: 0; cursor: crosshair; background: rgba(15, 18, 21, .28); user-select: none; font-family: "IBM Plex Sans Variable", system-ui, sans-serif; }
+.blurHud { position: fixed; left: 50%; bottom: 32px; transform: translateX(-50%); min-width: 500px; min-height: 62px; padding: 10px 14px; display: grid; grid-template-columns: 34px 1fr auto; align-items: center; gap: 12px; border: 1px solid #353b41; border-radius: 10px; background: #1d2125; color: #f2f4f5; box-shadow: 0 12px 34px rgba(0,0,0,.35); pointer-events: none; }
+.blurHud .chronaMark { width: 30px; height: 30px; fill: none; stroke: #df7954; stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; }
+.blurHud > div { display: grid; gap: 2px; }
+.blurHud strong { font-size: 12px; font-weight: 620; }
+.blurHud span, .blurHud small { color: #a7b0b8; font-size: 10px; }
+.blurHud small { font-family: "IBM Plex Mono", monospace; }

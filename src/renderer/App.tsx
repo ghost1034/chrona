@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react'
-import type { ReactNode } from 'react'
 import type {
   TimelineCardDTO,
   TimelineSearchFiltersDTO,
@@ -20,6 +19,11 @@ import { SettingsView } from './SettingsView'
 import { OnboardingView } from './OnboardingView'
 import { Markdown } from './Markdown'
 import { TodayView } from './TodayView'
+import { Icon } from './components/Icon'
+import { QuickAccess } from './features/quickAccess/QuickAccess'
+import { ApplicationSidebar } from './components/ApplicationSidebar'
+import { ReviewQueue } from './features/reflect/ReviewQueue'
+import * as Tabs from '@radix-ui/react-tabs'
 import {
   routeFromNavigationEvent,
   routeReducer,
@@ -124,11 +128,15 @@ export function App() {
   const timelineSearchRunIdRef = useRef<number>(0)
   const [selectedCardId, setSelectedCardId] = useState<number | null>(null)
   const [route, dispatchRoute] = useReducer(routeReducer, { name: 'today' } satisfies RendererRoute)
-  const view: View = route.name === 'insights' ? 'dashboard' : route.name
+  const view: View = route.name === 'insights' ? 'dashboard' : route.name === 'reflect' ? route.tab : route.name
   const setView = useCallback((next: View) => {
     dispatchRoute({
       type: 'navigate',
-      target: next === 'dashboard' ? { name: 'insights' } : { name: next }
+      target: next === 'dashboard'
+        ? { name: 'insights' }
+        : next === 'review' || next === 'journal'
+          ? { name: 'reflect', tab: next }
+          : { name: next }
     })
   }, [])
   const [reviewCoverage, setReviewCoverage] = useState<Record<number, number>>({})
@@ -377,6 +385,16 @@ export function App() {
     media.addEventListener('change', apply)
     return () => media.removeEventListener('change', apply)
   }, [themePreference])
+
+  const platform: 'darwin' | 'win32' | 'linux' = setupStatus?.platform === 'darwin'
+    ? 'darwin'
+    : setupStatus?.platform === 'linux'
+      ? 'linux'
+      : 'win32'
+
+  useEffect(() => {
+    document.documentElement.dataset.platform = platform
+  }, [platform])
 
   useEffect(() => {
     setTimelineFiltersOpen(false)
@@ -671,8 +689,14 @@ export function App() {
   }
 
   function jumpToTimelineCard(c: TimelineCardDTO) {
-    pendingJumpRef.current = { dayKey: c.dayKey, cardId: c.id }
+    if (c.dayKey === dayKeyRef.current) {
+      pendingJumpRef.current = null
+      setSelectedCardId(c.id)
+    } else {
+      pendingJumpRef.current = { dayKey: c.dayKey, cardId: c.id }
+    }
     setTimelineSearchScopePreset('day')
+    setTimelineSearchQuery('')
     setView('timeline')
     setDayKey(c.dayKey)
   }
@@ -1177,6 +1201,14 @@ export function App() {
     return applyTimelineClientFilters(cards, timelineSearchQuery, timelineFilters)
   }, [cards, timelineSearchQuery, timelineFilters, timelineSearchScopePreset])
 
+  const timelineResultHits = useMemo<TimelineSearchHitDTO[]>(
+    () => timelineSearchScopePreset === 'day'
+      ? visibleDayCards.map((card) => ({ card, snippet: card.summary }))
+      : timelineSearchHits,
+    [timelineSearchHits, timelineSearchScopePreset, visibleDayCards]
+  )
+  const timelineShowingResults = timelineSearchScopePreset !== 'day' || timelineSearchQuery.trim().length > 0
+
   useEffect(() => {
     if (view !== 'timeline') return
     if (timelineSearchScopePreset !== 'day') return
@@ -1295,58 +1327,22 @@ export function App() {
       : null
 
   return (
-    <div className="app">
-      <aside className="appSidebar" aria-label="Primary navigation">
-        <div className="sidebarBrand" aria-label="Chrona">
-          <span className="brandMark" aria-hidden="true">C</span>
-          <span className="sidebarWordmark">Chrona</span>
-        </div>
-        <nav className="primaryNav">
-          {([
-            ['today', 'Today', 'sun'],
-            ['timeline', 'Timeline', 'timeline'],
-            ['review', 'Review', 'check'],
-            ['dashboard', 'Insights', 'chart'],
-            ['ask', 'Ask Chrona', 'spark'],
-            ['journal', 'Journal', 'book']
-          ] as const).map(([target, label, icon]) => (
-            <button
-              key={target}
-              className={`navItem ${view === target ? 'active' : ''}`}
-              onClick={() => {
-                if (target === 'today') setDayKey(dayKeyFromUnixSeconds(Math.floor(Date.now() / 1000)))
-                setView(target)
-              }}
-              aria-current={view === target ? 'page' : undefined}
-              title={label}
-            >
-              <Icon name={icon} />
-              <span>{label}</span>
-            </button>
-          ))}
-        </nav>
-        <div className="sidebarBottom">
-          <button
-            className={`captureStatus ${recording ? 'recording' : ''}`}
-            onClick={() => void onToggleRecording()}
-            aria-pressed={recording}
-            title={recording ? 'Stop recording' : 'Start recording'}
-          >
-            <span className="captureStatusDot" aria-hidden="true" />
-            <span className="captureStatusCopy">
-              <strong>{systemPaused ? 'System paused' : recording ? 'Recording' : 'Not recording'}</strong>
-              <small>{recording ? 'Click to stop' : 'Click to start'}</small>
-            </span>
-          </button>
-          <button className={`navItem ${view === 'settings' ? 'active' : ''}`} onClick={() => setView('settings')} title="Settings">
-            <Icon name="settings" /><span>Settings</span>
-            <kbd>{setupStatus?.platform === 'darwin' ? '⌘,' : 'Ctrl+,'}</kbd>
-          </button>
-          <button className="navItem" onClick={() => setView('onboarding')} title="Help and setup">
-            <Icon name="help" /><span>Help &amp; setup</span>
-          </button>
-        </div>
-      </aside>
+    <div className="app" data-platform={platform}>
+      <ApplicationSidebar
+        route={route}
+        recording={recording}
+        systemPaused={systemPaused}
+        platform={platform}
+        onToggleRecording={onToggleRecording}
+        onNavigate={(target) => {
+          if (target === 'today') {
+            setDayKey(dayKeyFromUnixSeconds(Math.floor(Date.now() / 1000)))
+            setView('today')
+          } else if (target === 'reflect') setView('review')
+          else if (target === 'insights') setView('dashboard')
+          else setView(target)
+        }}
+      />
 
       <div className="appWorkspace">
         <header className="pageHeader">
@@ -1355,6 +1351,11 @@ export function App() {
             <p>{pageSubtitle(view, dayKey)}</p>
           </div>
           <div className="pageActions">
+            {(view === 'review' || view === 'journal') ? (
+              <Tabs.Root className="segmented reflectTabs" value={view} onValueChange={(value) => setView(value as 'review' | 'journal')}>
+                <Tabs.List aria-label="Reflect view"><Tabs.Trigger value="review">Review</Tabs.Trigger><Tabs.Trigger value="journal">Journal</Tabs.Trigger></Tabs.List>
+              </Tabs.Root>
+            ) : null}
             {(view === 'timeline' || view === 'review' || view === 'journal') ? (
               <div className="dateNavigator" aria-label="Date navigation">
                 <button className="iconBtn" onClick={() => shiftDay(-1)} aria-label="Previous day"><Icon name="chevronLeft" /></button>
@@ -1645,7 +1646,7 @@ export function App() {
 
               <div className="timelineControlsRow timelineCategoryFilters">
                 <div className="row" style={{ flexWrap: 'wrap' }}>
-                  {[...categoryNamesOrdered, 'System'].map((cat) => {
+                  {Array.from(new Set([...categoryNamesOrdered, 'System'])).map((cat) => {
                     const active = (timelineFilters.categories ?? []).includes(cat)
                     return (
                       <button
@@ -1691,11 +1692,11 @@ export function App() {
             </div>
 
             <div className="timelineScroll" ref={timelineScrollRef}>
-              {timelineSearchScopePreset !== 'day' ? (
+              {timelineShowingResults ? (
                 <div className="searchResults">
                   {timelineSearchError ? <div className="mono error">{timelineSearchError}</div> : null}
 
-                  {!timelineSearchLoading && timelineSearchHits.length === 0 && !timelineSearchError ? (
+                  {!timelineSearchLoading && timelineResultHits.length === 0 && !timelineSearchError ? (
                     <div className="reviewEmpty">
                       <div className="sideTitle">No results</div>
                       <div className="sideMeta">
@@ -1704,7 +1705,7 @@ export function App() {
                     </div>
                   ) : null}
 
-                  {timelineSearchHits.map((h) => {
+                  {timelineResultHits.map((h) => {
                     const c = h.card
                     return (
                       <button
@@ -1725,7 +1726,7 @@ export function App() {
                     )
                   })}
 
-                  {timelineSearchHasMore && !timelineSearchLoading ? (
+                  {timelineSearchScopePreset !== 'day' && timelineSearchHasMore && !timelineSearchLoading ? (
                     <div className="row" style={{ padding: '12px 16px' }}>
                       <button className="btn" onClick={() => void loadMoreTimelineSearch()}>
                         Load more
@@ -1869,6 +1870,7 @@ export function App() {
                 </div>
 
                 <div className="askComposer">
+                  <div className="askActiveContext"><Icon name="scope" /><span>{getAskScope().label}</span></div>
                   <textarea
                     className="input askInput"
                     rows={2}
@@ -2397,8 +2399,8 @@ export function App() {
                 </div>
               ) : null}
 
-              <div className="field">
-                <div className="label">Category</div>
+              <label className="field">
+                <span className="label">Category</span>
                 <select
                   className="input"
                   value={selectedCard.category}
@@ -2433,10 +2435,10 @@ export function App() {
                       ))
                   )}
                 </select>
-              </div>
+              </label>
 
-              <div className="field">
-                <div className="label">Subcategory</div>
+              <label className="field">
+                <span className="label">Subcategory</span>
                 <select
                   className="input"
                   value={selectedCard.subcategory ?? ''}
@@ -2468,7 +2470,7 @@ export function App() {
                       </option>
                     ))}
                 </select>
-              </div>
+              </label>
 
               {selectedCard.summary ? (
                 <div className="block">
@@ -2539,6 +2541,18 @@ export function App() {
           )}
         </aside>
       </main>
+      <QuickAccess
+        platform={platform}
+        dayKey={dayKey}
+        recording={recording}
+        onNavigate={(target) => {
+          if (target === 'reflect') setView('review')
+          else if (target === 'insights') setView('dashboard')
+          else setView(target)
+        }}
+        onToggleRecording={onToggleRecording}
+        onJumpToCard={jumpToTimelineCard}
+      />
       </div>
     </div>
   )
@@ -2628,10 +2642,10 @@ function pageTitle(view: View): string {
   switch (view) {
     case 'today': return 'Today'
     case 'timeline': return 'Timeline'
-    case 'review': return 'Review'
+    case 'review': return 'Reflect'
     case 'dashboard': return 'Insights'
-    case 'ask': return 'Ask Chrona'
-    case 'journal': return 'Journal'
+    case 'ask': return 'Ask'
+    case 'journal': return 'Reflect'
     case 'settings': return 'Settings'
     case 'onboarding': return 'Welcome to Chrona'
   }
@@ -2640,10 +2654,10 @@ function pageTitle(view: View): string {
 function pageSubtitle(view: View, dayKey: string): string {
   if (view === 'today') return formatFriendlyDay(dayKeyFromUnixSeconds(Math.floor(Date.now() / 1000)))
   if (view === 'timeline') return `A detailed record of ${formatFriendlyDay(dayKey)}`
-  if (view === 'review') return `Build an honest picture of ${formatFriendlyDay(dayKey)}`
+  if (view === 'review') return `Review ${formatFriendlyDay(dayKey)}`
   if (view === 'dashboard') return 'Patterns across your time and attention'
   if (view === 'ask') return 'Explore your activity in your own words'
-  if (view === 'journal') return `A quiet space for ${formatFriendlyDay(dayKey)}`
+  if (view === 'journal') return `Journal for ${formatFriendlyDay(dayKey)}`
   if (view === 'settings') return 'Make Chrona work the way you do'
   return 'Four small steps, then you’re ready'
 }
@@ -2651,30 +2665,6 @@ function pageSubtitle(view: View, dayKey: string): string {
 function formatFriendlyDay(dayKey: string): string {
   const date = new Date(`${dayKey}T12:00:00`)
   return new Intl.DateTimeFormat(undefined, { weekday: 'long', month: 'long', day: 'numeric' }).format(date)
-}
-
-type IconName = 'sun' | 'timeline' | 'check' | 'chart' | 'spark' | 'book' | 'settings' | 'help' | 'chevronLeft' | 'chevronRight' | 'filter' | 'export' | 'scope' | 'close' | 'focus' | 'neutral' | 'distracted'
-
-function Icon({ name }: { name: IconName }) {
-  const paths: Record<IconName, ReactNode> = {
-    sun: <><circle cx="12" cy="12" r="3.5"/><path d="M12 2v2M12 20v2M4.93 4.93l1.42 1.42M17.65 17.65l1.42 1.42M2 12h2M20 12h2M4.93 19.07l1.42-1.42M17.65 6.35l1.42-1.42"/></>,
-    timeline: <><path d="M6 3v18M6 7h12M6 12h8M6 17h11"/><circle cx="6" cy="7" r="1.5"/><circle cx="6" cy="17" r="1.5"/></>,
-    check: <><path d="M5 12.5l4 4L19 6.5"/><circle cx="12" cy="12" r="9"/></>,
-    chart: <><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></>,
-    spark: <path d="M12 2l1.5 6.5L20 10l-6.5 1.5L12 18l-1.5-6.5L4 10l6.5-1.5L12 2zM19 17l.6 2.4L22 20l-2.4.6L19 23l-.6-2.4L16 20l2.4-.6L19 17z"/>,
-    book: <><path d="M4 4.5A3.5 3.5 0 017.5 1H20v18H7.5A3.5 3.5 0 004 22.5v-18z"/><path d="M4 19a3 3 0 013-3h13"/></>,
-    settings: <><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 00.34 1.88l.06.06-2.83 2.83-.06-.06a1.7 1.7 0 00-1.88-.34 1.7 1.7 0 00-1.03 1.56V21h-4v-.08A1.7 1.7 0 009 19.36a1.7 1.7 0 00-1.88.34l-.06.06-2.83-2.83.06-.06A1.7 1.7 0 004.63 15 1.7 1.7 0 003.08 14H3v-4h.08A1.7 1.7 0 004.64 9a1.7 1.7 0 00-.34-1.88l-.06-.06 2.83-2.83.06.06A1.7 1.7 0 009 4.63 1.7 1.7 0 0010 3.08V3h4v.08A1.7 1.7 0 0015 4.64a1.7 1.7 0 001.88-.34l.06-.06 2.83 2.83-.06.06A1.7 1.7 0 0019.37 9 1.7 1.7 0 0020.92 10H21v4h-.08A1.7 1.7 0 0019.4 15z"/></>,
-    help: <><circle cx="12" cy="12" r="9"/><path d="M9.7 9a2.4 2.4 0 114 1.8c-1.2.8-1.7 1.2-1.7 2.4M12 17h.01"/></>,
-    chevronLeft: <path d="M15 18l-6-6 6-6"/>, chevronRight: <path d="M9 18l6-6-6-6"/>,
-    filter: <path d="M4 6h16M7 12h10M10 18h4"/>,
-    export: <><path d="M12 3v12M8 7l4-4 4 4"/><path d="M5 13v7h14v-7"/></>,
-    scope: <><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="2"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/></>,
-    close: <path d="M6 6l12 12M18 6L6 18"/>,
-    focus: <><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3"/></>,
-    neutral: <><circle cx="12" cy="12" r="8"/><path d="M8 12h8"/></>,
-    distracted: <><path d="M5 5l14 14M19 5L5 19"/><circle cx="12" cy="12" r="9"/></>
-  }
-  return <svg className="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{paths[name]}</svg>
 }
 
 function addDaysToDayKey(dayKey: string, deltaDays: number): string {
@@ -2909,90 +2899,4 @@ function renderTimeTicks(windowStartTs: number, pxPerHourRaw: number) {
   }
 
   return ticks
-}
-
-function ReviewQueue(props: {
-  cards: TimelineCardDTO[]
-  coverage: Record<number, number>
-  onRate: (card: TimelineCardDTO, rating: 'focus' | 'neutral' | 'distracted') => void
-}) {
-  const [index, setIndex] = useState(0)
-  const rows = props.cards
-    .filter((c) => c.category !== 'System')
-    .map((card) => ({ card, coverage: props.coverage[card.id] ?? 0 }))
-    .filter((x) => x.coverage < 0.8)
-    .sort((a, b) => a.card.startTs - b.card.startTs)
-
-  const safeIndex = Math.max(0, Math.min(index, rows.length - 1))
-  const current = rows[safeIndex]
-
-  useEffect(() => {
-    if (index >= rows.length) setIndex(Math.max(0, rows.length - 1))
-  }, [index, rows.length])
-
-  useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent) => {
-      const element = document.activeElement as HTMLElement | null
-      if (element && ['INPUT', 'TEXTAREA', 'SELECT'].includes(element.tagName)) return
-      if (!current) return
-      const ratings = { '1': 'focus', '2': 'neutral', '3': 'distracted' } as const
-      const rating = ratings[event.key as keyof typeof ratings]
-      if (rating) {
-        event.preventDefault()
-        props.onRate(current.card, rating)
-        return
-      }
-      if (event.key === 'ArrowLeft') {
-        event.preventDefault()
-        setIndex((value) => Math.max(0, value - 1))
-      }
-      if (event.key === 'ArrowRight') {
-        event.preventDefault()
-        setIndex((value) => Math.min(rows.length - 1, value + 1))
-      }
-    }
-    window.addEventListener('keydown', onKeyDown)
-    return () => window.removeEventListener('keydown', onKeyDown)
-  }, [current, props, rows.length])
-
-  if (rows.length === 0) {
-    return (
-      <div className="reviewEmpty reviewComplete">
-        <div className="emptyStateIcon" aria-hidden="true">✓</div>
-        <div className="sideTitle">You’re all caught up</div>
-        <div className="sideMeta">Every activity is at least 80% reviewed.</div>
-      </div>
-    )
-  }
-
-  return (
-    <div className="reviewQueue">
-      <div className="reviewHeader">
-        <div>
-          <div className="eyebrow">Daily review</div>
-          <div className="sideTitle">How focused was this activity?</div>
-        </div>
-        <div className="reviewProgressCopy">{safeIndex + 1} of {rows.length}</div>
-      </div>
-      <div className="reviewProgress" aria-label={`${safeIndex + 1} of ${rows.length} activities`}>
-        <span style={{ width: `${((safeIndex + 1) / rows.length) * 100}%` }} />
-      </div>
-      <article className="reviewFocusCard">
-        <div className="reviewTime">{formatClockAscii(current.card.startTs)} — {formatClockAscii(current.card.endTs)}</div>
-        <h2>{current.card.title}</h2>
-        <div className="reviewCategory"><span />{current.card.category}{current.card.subcategory ? ` · ${current.card.subcategory}` : ''}</div>
-        {current.card.summary ? <p>{current.card.summary}</p> : null}
-        <div className="reviewCoverageNote">Currently {Math.round(current.coverage * 100)}% covered · 80% completes this activity</div>
-      </article>
-      <div className="reviewRatingActions" aria-label="Focus rating">
-        <button onClick={() => props.onRate(current.card, 'focus')}><Icon name="focus" /><span><strong>Focus</strong><small>Intentional, productive</small></span><kbd>1</kbd></button>
-        <button onClick={() => props.onRate(current.card, 'neutral')}><Icon name="neutral" /><span><strong>Neutral</strong><small>Necessary or routine</small></span><kbd>2</kbd></button>
-        <button onClick={() => props.onRate(current.card, 'distracted')}><Icon name="distracted" /><span><strong>Distracted</strong><small>Unplanned, low value</small></span><kbd>3</kbd></button>
-      </div>
-      <div className="reviewNavActions">
-        <button className="btn btn-quiet" disabled={safeIndex === 0} onClick={() => setIndex((value) => Math.max(0, value - 1))}>← Previous</button>
-        <button className="btn btn-quiet" disabled={safeIndex === rows.length - 1} onClick={() => setIndex((value) => Math.min(rows.length - 1, value + 1))}>Skip for now →</button>
-      </div>
-    </div>
-  )
 }

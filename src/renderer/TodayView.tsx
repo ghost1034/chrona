@@ -71,9 +71,9 @@ export function TodayView(props: {
     <div className="todayView">
       <section className="todayHero" aria-labelledby="today-heading">
         <div>
-          <div className="eyebrow">Your day at a glance</div>
-          <h2 id="today-heading">Make the next hour count.</h2>
-          <p>Chrona quietly turns your activity into a timeline you can understand and improve.</p>
+          <div className="eyebrow">Capture → understand → reflect</div>
+          <h2 id="today-heading">{props.systemPaused ? 'Capture is paused' : props.recording ? 'Capture is healthy' : 'Capture is off'}</h2>
+          <p>{recentCards[0] ? `Most recent: ${recentCards[0].title} at ${formatClockAscii(recentCards[0].startTs)}.` : 'No activity has been captured for this day yet.'}</p>
         </div>
         <button className="btn btn-accent todayPrimaryAction" onClick={nextAction.action}>
           {nextAction.label}

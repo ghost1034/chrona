@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
+import * as Dialog from '@radix-ui/react-dialog'
+import * as Switch from '@radix-ui/react-switch'
 import { formatBytes } from '../shared/format'
 import type { CategoryDefinition, SubcategoryDefinition } from '../shared/categories'
 import { SyncSettings } from './SyncSettings'
@@ -127,10 +129,9 @@ export function SettingsView(props: {
     () => [
       { id: 'general', label: 'General' },
       { id: 'capture', label: 'Capture & Privacy' },
-      { id: 'timeline', label: 'Timeline & Categories' },
-      { id: 'ai', label: 'AI & Analysis' },
-      { id: 'storage', label: 'Storage' },
-      { id: 'integrations', label: 'Integrations' },
+      { id: 'categories', label: 'Categories' },
+      { id: 'intelligence', label: 'Intelligence' },
+      { id: 'data', label: 'Data & Sync' },
       { id: 'advanced', label: 'Advanced' }
     ],
     []
@@ -169,13 +170,13 @@ export function SettingsView(props: {
   })
 
   useEffect(() => {
-    if (active !== 'timeline') return
+    if (active !== 'categories') return
     const has = orderedCategories.some((c) => c.id === activeCategoryId)
     if (!has) setActiveCategoryId(orderedCategories[0]?.id ?? '')
   }, [active, activeCategoryId, orderedCategories])
 
   useEffect(() => {
-    if (active !== 'timeline') return
+    if (active !== 'categories') return
     setCategoryDrafts((prev) => {
       const next = { ...prev }
       for (const c of orderedCategories) {
@@ -192,7 +193,7 @@ export function SettingsView(props: {
   }, [props.subcategories, activeCategoryId])
 
   useEffect(() => {
-    if (active !== 'timeline') return
+    if (active !== 'categories') return
     setSubcategoryDrafts((prev) => {
       const next = { ...prev }
       for (const s of props.subcategories) {
@@ -212,6 +213,7 @@ export function SettingsView(props: {
   const [pendingDeleteSubId, setPendingDeleteSubId] = useState<string | null>(null)
   const [pendingDeleteSubMode, setPendingDeleteSubMode] = useState<'clear' | 'reassign'>('clear')
   const [pendingDeleteSubReassignId, setPendingDeleteSubReassignId] = useState<string>('')
+  const [purgeConfirmOpen, setPurgeConfirmOpen] = useState(false)
 
   return (
     <div className="settingsWrap">
@@ -331,7 +333,7 @@ export function SettingsView(props: {
           </div>
         ) : null}
 
-        {active === 'timeline' ? (
+        {active === 'categories' ? (
           <div className="settingsSection">
             <div className="sideTitle">Timeline categories</div>
             <div className="sideMeta">
@@ -978,7 +980,7 @@ export function SettingsView(props: {
           </details>
         ) : null}
 
-        {active === 'ai' ? (
+        {active === 'intelligence' ? (
           <div className="settingsSection">
             <div className="sideTitle">AI (Gemini)</div>
             <div className="sideMeta">Configure the Gemini API key, model, and runtime options.</div>
@@ -1142,7 +1144,7 @@ export function SettingsView(props: {
           </details>
         ) : null}
 
-        {active === 'storage' ? (
+        {active === 'data' ? (
           <div className="settingsSection">
             <div className="sideTitle">Storage</div>
             <div className="sideMeta">
@@ -1181,7 +1183,7 @@ export function SettingsView(props: {
                 <button className="btn" onClick={() => void props.onSaveStorageLimits()}>
                   Save limits
                 </button>
-                <button className="btn" onClick={() => void props.onPurgeNow()}>
+                <button className="btn btn-danger" onClick={() => setPurgeConfirmOpen(true)}>
                   Purge now
                 </button>
                 <button className="btn" onClick={() => void window.chrona.openRecordingsFolder()}>
@@ -1193,13 +1195,11 @@ export function SettingsView(props: {
             <div className="block">
               <div className="sideTitle">Timelapses</div>
               <div className="row">
-                <label className="pill">
-                  <input
-                    type="checkbox"
-                    checked={props.timelapsesEnabled}
-                    onChange={(e) => void props.onToggleTimelapsesEnabled(e.target.checked)}
-                  />
-                  Generate timelapses
+                <label className="switchField">
+                  <Switch.Root className="switchRoot" checked={props.timelapsesEnabled} onCheckedChange={(checked) => void props.onToggleTimelapsesEnabled(checked)}>
+                    <Switch.Thumb className="switchThumb" />
+                  </Switch.Root>
+                  <span><strong>Generate timelapses</strong><small>Create local video summaries from captured intervals.</small></span>
                 </label>
               </div>
               <div className="row">
@@ -1222,7 +1222,7 @@ export function SettingsView(props: {
           </div>
         ) : null}
 
-        {active === 'integrations' ? <SyncSettings /> : null}
+        {active === 'data' ? <SyncSettings /> : null}
 
         {false ? (
           <div className="settingsSection">
@@ -1242,6 +1242,19 @@ export function SettingsView(props: {
           </div>
         ) : null}
       </div>
+      <Dialog.Root open={purgeConfirmOpen} onOpenChange={setPurgeConfirmOpen}>
+        <Dialog.Portal>
+          <Dialog.Overlay className="modalOverlay" />
+          <Dialog.Content className="modal destructiveDialog" aria-describedby="purge-description">
+            <Dialog.Title className="modalTitle">Purge media now?</Dialog.Title>
+            <Dialog.Description className="modalMeta" id="purge-description">Chrona will permanently remove recordings and timelapses beyond your storage limits. Timeline text and journal entries are kept.</Dialog.Description>
+            <div className="modalActions">
+              <Dialog.Close asChild><button className="btn">Cancel</button></Dialog.Close>
+              <button className="btn btn-danger" onClick={() => void props.onPurgeNow().then(() => setPurgeConfirmOpen(false))}>Purge media</button>
+            </div>
+          </Dialog.Content>
+        </Dialog.Portal>
+      </Dialog.Root>
     </div>
   )
 }

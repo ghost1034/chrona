@@ -1,0 +1,54 @@
+:root {
+  --canvas: #f4f5f6;
+  --surface: #ffffff;
+  --surface-subtle: #eef0f2;
+  --text-primary: #1d232a;
+  --text-secondary: #66707a;
+  --border: #d9dee3;
+  --chrona: #a64b2a;
+  --chrona-hover: #8d3e23;
+  --focus: #246bce;
+  --success: #287a52;
+  --warning: #a56312;
+  --danger: #b4232d;
+
+  /* Compatibility aliases while feature styles are moved into modules. */
+  --bg0: var(--canvas);
+  --bg1: var(--canvas);
+  --card: var(--surface);
+  --card2: var(--surface-subtle);
+  --text: var(--text-primary);
+  --muted: var(--text-secondary);
+  --muted-strong: #4f5963;
+  --stroke: var(--border);
+  --stroke-strong: #bdc5cd;
+  --accent: var(--chrona);
+  --accent-hover: var(--chrona-hover);
+  --accent-soft: #f6e9e4;
+  --accent2: #246bce;
+  --focus-ring: var(--focus);
+  --sidebar: #eef0f2;
+  --sidebar-active: #ffffff;
+  --shadow: rgba(29, 35, 42, 0.14);
+}
+
+:root[data-theme='dark'] {
+  --canvas: #15181b;
+  --surface: #1d2125;
+  --surface-subtle: #24292e;
+  --text-primary: #f2f4f5;
+  --text-secondary: #a7b0b8;
+  --border: #353b41;
+  --chrona: #df7954;
+  --chrona-hover: #eb8b67;
+  --focus: #5c9cf0;
+  --success: #55ad7d;
+  --warning: #d59a46;
+  --danger: #f06b73;
+  --muted-strong: #c4cbd1;
+  --stroke-strong: #515a63;
+  --accent-soft: #3a2924;
+  --sidebar: #191d20;
+  --sidebar-active: #252a2f;
+  --shadow: rgba(0, 0, 0, 0.34);
+}

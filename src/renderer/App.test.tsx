@@ -10,7 +10,9 @@ describe('application shell', () => {
     expect(html).toContain('aria-current="page"')
     expect(html).toContain('<main class="layout">')
     expect(html).toContain('<h1>Today</h1>')
-    expect(html).toContain('Your day at a glance')
+    expect(html).toContain('Capture → understand → reflect')
+    expect(html).toContain('>Reflect</span>')
+    expect(html).not.toContain('>Review</span>')
     expect(html).not.toContain('>Setup</button>')
   })
 

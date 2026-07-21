@@ -11,7 +11,9 @@ export function createTray(opts: {
   onOpen: () => void
   onQuit: () => void
 }): { tray: Tray; updateMenu: () => void } {
-  const tray = new Tray(getFallbackIcon())
+  const trayIcon = getChronaTrayIcon()
+  if (process.platform === 'darwin') trayIcon.setTemplateImage(true)
+  const tray = new Tray(trayIcon)
   tray.setToolTip('Chrona')
 
   const updateMenu = () => {
@@ -84,11 +86,11 @@ function buildTemplate(
   ]
 }
 
-function getFallbackIcon() {
-  // Phase 1: ship a minimal embedded image so Tray construction never fails.
-  // Later phases should replace this with a proper per-OS tray icon asset.
-  const tinyPngBase64 =
-    'iVBORw0KGgoAAAANSUhEUgAAAA4AAAAOCAYAAAAfSC3RAAAAQklEQVQ4T2NkwA/+//8/DAwMDAwM/4GBgYGJgYHhP4YBqIYgYtQGQwYqgQmGJQxGgQAAO0cG9tK3QnAAAAAElFTkSuQmCC'
+function getChronaTrayIcon() {
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32"><g fill="none" stroke="#000" stroke-linecap="round" stroke-linejoin="round"><path d="M23.8 7.2A11.2 11.2 0 1 0 25.7 21" stroke-width="3"/><path d="M16 16 23.7 10.8" stroke-width="2.4"/></g><circle cx="16" cy="16" r="1.6" fill="#000"/></svg>`
+  const icon = nativeImage.createFromBuffer(Buffer.from(svg))
+  if (!icon.isEmpty()) return icon.resize({ width: process.platform === 'darwin' ? 18 : 20 })
 
-  return nativeImage.createFromDataURL(`data:image/png;base64,${tinyPngBase64}`)
+  // Construction must remain safe even if a platform build cannot decode SVG.
+  return nativeImage.createFromDataURL('data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAA4AAAAOCAYAAAAfSC3RAAAAQklEQVQ4T2NkwA/+//8/DAwMDAwM/4GBgYGJgYHhP4YBqIYgYtQGQwYqgQmGJQxGgQAAO0cG9tK3QnAAAAAElFTkSuQmCC')
 }

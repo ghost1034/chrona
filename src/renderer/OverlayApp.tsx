@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useState } from 'react'
 import type { BlurRegion } from '../shared/blurRegions'
 import { normalizedRectFromDrag } from '../shared/blurRegions'
+import { ChronaMark } from './components/Icon'
+import './styles/overlay.css'
 
 type DragState = {
   startX: number
@@ -69,17 +71,11 @@ export function OverlayApp() {
 
   return (
     <div
+      className="blurOverlay"
+      data-display-id={displayId}
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
       onPointerUp={onPointerUp}
-      style={{
-        position: 'fixed',
-        inset: 0,
-        cursor: 'crosshair',
-        background: 'rgba(0, 0, 0, 0.25)',
-        userSelect: 'none',
-        fontFamily: 'system-ui, sans-serif'
-      }}
     >
       {regions.map((r) => (
         <div
@@ -135,23 +131,10 @@ export function OverlayApp() {
         />
       )}
 
-      <div
-        style={{
-          position: 'fixed',
-          bottom: 32,
-          left: '50%',
-          transform: 'translateX(-50%)',
-          padding: '10px 18px',
-          borderRadius: 8,
-          background: 'rgba(14, 17, 22, 0.9)',
-          color: '#e6ebf2',
-          fontSize: 13,
-          whiteSpace: 'nowrap',
-          pointerEvents: 'none'
-        }}
-      >
-        Drag to add a blur region · click × to remove · Esc to finish. Blurred areas are hidden
-        from AI but stay visible to you.
+      <div className="blurHud">
+        <ChronaMark />
+        <div><strong>Protect a screen area</strong><span>Drag to add · click × to remove · Esc to finish</span></div>
+        <small>Excluded before storage or AI analysis</small>
       </div>
     </div>
   )
