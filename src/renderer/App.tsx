@@ -18,12 +18,28 @@ import { DashboardView } from './DashboardView'
 import { SettingsView } from './SettingsView'
 import { OnboardingView } from './OnboardingView'
 import { Markdown } from './Markdown'
+import {
+  BarChart3,
+  CalendarDays,
+  ChevronLeft,
+  ChevronRight,
+  CircleHelp,
+  Download,
+  FileText,
+  MessageCircle,
+  Minus,
+  Plus,
+  Search,
+  Settings as SettingsIcon,
+  Sparkles,
+  TimerReset
+} from 'lucide-react'
 
 type DisplayInfo = { id: string; bounds: { width: number; height: number }; scaleFactor: number }
 
 const HOURS_IN_TIMELINE = 24
 const TIMELINE_GRID_PADDING_PX = 16
-const TIMELINE_ZOOM_DEFAULT_PX_PER_HOUR = 600
+const TIMELINE_ZOOM_DEFAULT_PX_PER_HOUR = 180
 const TIMELINE_ZOOM_MIN_PX_PER_HOUR = 50
 const TIMELINE_ZOOM_MAX_PX_PER_HOUR = 3600
 const TIMELINE_MIN_CARD_HEIGHT_PX = 1
@@ -37,6 +53,7 @@ type TimelineMetrics = {
 }
 
 export function App() {
+  const [appearanceMode, setAppearanceMode] = useState<'system' | 'light' | 'dark'>('system')
   const [interval, setInterval] = useState<number | null>(null)
   const [recording, setRecording] = useState<boolean>(false)
   const [systemPaused, setSystemPaused] = useState<boolean>(false)
@@ -120,7 +137,10 @@ export function App() {
   >(
     'timeline'
   )
+  const [timelineFiltersOpen, setTimelineFiltersOpen] = useState<boolean>(false)
+  const [journalDrawerOpen, setJournalDrawerOpen] = useState<boolean>(false)
   const [reviewCoverage, setReviewCoverage] = useState<Record<number, number>>({})
+  const [reviewSkipped, setReviewSkipped] = useState<Set<number>>(() => new Set())
 
   const [timelinePxPerHour, setTimelinePxPerHour] = useState<number>(TIMELINE_ZOOM_DEFAULT_PX_PER_HOUR)
   const timelineScrollRef = useRef<HTMLDivElement | null>(null)
@@ -259,6 +279,7 @@ export function App() {
       await refreshSetupStatus()
 
       const settings = await window.chrona.getSettings()
+      setAppearanceMode(settings.appearanceMode ?? 'system')
       setCategoryDefs(Array.isArray((settings as any).categories) ? ((settings as any).categories as any) : [])
       setSubcategoryDefs(
         Array.isArray((settings as any).subcategories) ? ((settings as any).subcategories as any) : []
@@ -342,6 +363,23 @@ export function App() {
       unsubUsage()
       unsubNav()
     }
+  }, [])
+
+  useEffect(() => {
+    const media = window.matchMedia('(prefers-color-scheme: dark)')
+    const apply = () => {
+      const resolved = appearanceMode === 'system' ? (media.matches ? 'dark' : 'light') : appearanceMode
+      document.documentElement.dataset.theme = resolved
+      document.documentElement.style.colorScheme = resolved
+    }
+    apply()
+    media.addEventListener('change', apply)
+    return () => media.removeEventListener('change', apply)
+  }, [appearanceMode])
+
+  const onChangeAppearance = useCallback(async (mode: 'system' | 'light' | 'dark') => {
+    setAppearanceMode(mode)
+    await window.chrona.updateSettings({ appearanceMode: mode })
   }, [])
 
   useEffect(() => {
@@ -491,9 +529,11 @@ export function App() {
   }, [timelinePxPerHour])
 
   useEffect(() => {
-    if (view !== 'review') return
+    if (view !== 'review' && view !== 'timeline') return
     void refreshReview(dayKey)
   }, [view, dayKey])
+
+  useEffect(() => setReviewSkipped(new Set()), [dayKey])
 
   useEffect(() => {
     const unsub = window.chrona.onTimelineUpdated((p) => {
@@ -1239,122 +1279,97 @@ export function App() {
       ? timeToYpx(nowTs, windowInfo.startTs, windowInfo.endTs, timelineMetrics)
       : null
 
+  const dayOverview = useMemo(() => {
+    const activity = cards.filter((card) => card.category !== 'System')
+    const trackedSeconds = activity.reduce((sum, card) => sum + Math.max(0, card.endTs - card.startTs), 0)
+    const remaining = activity.filter((card) => (reviewCoverage[card.id] ?? 0) < 0.8).length
+    const reviewed = activity.length - remaining
+    const byCategory = new Map<string, number>()
+    for (const card of activity) {
+      byCategory.set(card.category, (byCategory.get(card.category) ?? 0) + Math.max(0, card.endTs - card.startTs))
+    }
+    return {
+      trackedSeconds,
+      remaining,
+      coverage: activity.length ? reviewed / activity.length : 0,
+      categories: [...byCategory.entries()].sort((a, b) => b[1] - a[1])
+    }
+  }, [cards, reviewCoverage])
+
   return (
-    <div className="app">
-      <header className="header">
-        <div className="brandCluster">
-          <div className="brand">
-            <div className="wordmark">Chrona</div>
-            <div className="tagline">
-              {view === 'onboarding'
-                ? 'Setup'
-                : view === 'ask'
-                  ? 'Ask Chrona'
-                  : view === 'review'
-                    ? 'Review'
-                    : view === 'dashboard'
-                      ? 'Dashboard'
-                      : view === 'journal'
-                        ? `Journal · ${dayKey}`
-                        : `Timeline · ${dayKey}`}
+    <div className={`app app--${view}`}>
+      {view !== 'onboarding' ? (
+        <aside className="appSidebar" aria-label="Primary navigation">
+          <div className="sidebarBrand" aria-label="Chrona home">
+            <span className="wordmark">Chrona</span>
+            <span className="sidebarEdition">Your day, remembered.</span>
+          </div>
+          <nav className="sidebarNav">
+            <button className={`navItem ${view === 'timeline' || view === 'review' ? 'active' : ''}`} onClick={() => setView('timeline')}>
+              <CalendarDays size={18} aria-hidden="true" /><span>Timeline</span>
+            </button>
+            <button className={`navItem ${view === 'dashboard' ? 'active' : ''}`} onClick={() => setView('dashboard')}>
+              <BarChart3 size={18} aria-hidden="true" /><span>Insights</span>
+            </button>
+            <button className={`navItem ${view === 'ask' ? 'active' : ''}`} onClick={() => setView('ask')}>
+              <MessageCircle size={18} aria-hidden="true" /><span>Ask</span>
+            </button>
+            <button className={`navItem ${view === 'journal' ? 'active' : ''}`} onClick={() => setView('journal')}>
+              <FileText size={18} aria-hidden="true" /><span>Journal</span>
+            </button>
+          </nav>
+          <div className="sidebarFooter">
+            <button className={`navItem ${view === 'settings' ? 'active' : ''}`} onClick={() => setView('settings')}>
+              <SettingsIcon size={18} aria-hidden="true" /><span>Settings</span>
+            </button>
+            <button className={`captureStatus ${recording ? 'is-recording' : ''}`} onClick={onToggleRecording} aria-pressed={recording}>
+              <span className="captureDot" aria-hidden="true" />
+              <span><strong>{recording ? 'Recording' : systemPaused ? 'Paused' : 'Not recording'}</strong><small>{recording ? 'Click to stop' : 'Click to start'}</small></span>
+            </button>
+          </div>
+        </aside>
+      ) : null}
+
+      {view !== 'onboarding' ? (
+        <div className="pageHeader">
+          <div className="pageHeading">
+            <h1>{view === 'dashboard' ? 'Insights' : view === 'ask' ? 'Ask Chrona' : view === 'journal' ? 'Journal' : view === 'settings' ? 'Settings' : 'Timeline'}</h1>
+            {(view === 'timeline' || view === 'review' || view === 'journal') ? <p>{formatLongDate(dayKey)}</p> : view === 'dashboard' ? <p>Patterns across your time</p> : view === 'ask' ? <p>Answers grounded in your activity</p> : <p>Make Chrona yours</p>}
+          </div>
+
+          {(view === 'timeline' || view === 'review' || view === 'journal') ? (
+            <div className="dateNavigator" aria-label="Date navigation">
+              <button className="iconBtn" onClick={() => shiftDay(-1)} aria-label="Previous day"><ChevronLeft size={18} /></button>
+              <input className="dateInput" type="date" value={dayKey} onChange={(e) => setDayKey(e.target.value)} aria-label="Selected date" />
+              <button className="iconBtn" onClick={() => shiftDay(1)} aria-label="Next day"><ChevronRight size={18} /></button>
+              <button className="btn btn-quiet" onClick={() => setDayKey(dayKeyFromUnixSeconds(Math.floor(Date.now() / 1000)))}>Today</button>
             </div>
-          </div>
+          ) : null}
 
-          <button
-            className={`btn recordingControl ${recording ? 'recordingControl-active' : ''}`}
-            onClick={onToggleRecording}
-            aria-pressed={recording}
-            title={recording ? 'Stop screen recording' : 'Start screen recording'}
-          >
-            <span className="recordingControlDot" aria-hidden="true" />
-            {recording ? 'Stop recording' : 'Start recording'}
-          </button>
-        </div>
-
-        <div className="toolbar">
-          <button
-            className={`btn ${view === 'onboarding' ? 'btn-accent' : ''}`}
-            onClick={() => setView('onboarding')}
-          >
-            Setup
-          </button>
-          <button
-            className={`btn ${view === 'timeline' ? 'btn-accent' : ''}`}
-            onClick={() => setView('timeline')}
-          >
-            Timeline
-          </button>
-          <button
-            className={`btn ${view === 'review' ? 'btn-accent' : ''}`}
-            onClick={() => setView('review')}
-          >
-            Review
-          </button>
-          <button className={`btn ${view === 'ask' ? 'btn-accent' : ''}`} onClick={() => setView('ask')}>
-            Ask
-          </button>
-          <button
-            className={`btn ${view === 'dashboard' ? 'btn-accent' : ''}`}
-            onClick={() => setView('dashboard')}
-          >
-            Dashboard
-          </button>
-          <button
-            className={`btn ${view === 'journal' ? 'btn-accent' : ''}`}
-            onClick={() => setView('journal')}
-          >
-            Journal
-          </button>
-          <button
-            className={`btn ${view === 'settings' ? 'btn-accent' : ''}`}
-            onClick={() => setView('settings')}
-          >
-            Settings
-          </button>
-          <button className="btn" disabled={view !== 'timeline'} onClick={() => zoomOut()}>
-            Zoom -
-          </button>
-          <button className="btn" disabled={view !== 'timeline'} onClick={() => zoomIn()}>
-            Zoom +
-          </button>
-          <button className="btn" disabled={view !== 'timeline'} onClick={() => zoomReset()}>
-            Reset
-          </button>
-          <div className="pill" title="Timeline zoom">
-            Zoom {Math.round((timelinePxPerHour / TIMELINE_ZOOM_DEFAULT_PX_PER_HOUR) * 100)}%
+          <div className="pageActions">
+            {(view === 'timeline' || view === 'review') ? (
+              <div className="segmented" aria-label="Timeline mode">
+                <button className={view === 'timeline' ? 'active' : ''} onClick={() => setView('timeline')}>Day</button>
+                <button className={view === 'review' ? 'active' : ''} onClick={() => setView('review')}>Review</button>
+              </div>
+            ) : null}
+            {view === 'timeline' ? <>
+              <div className="zoomControls" aria-label="Timeline zoom">
+                <button className="iconBtn" onClick={() => zoomOut()} aria-label="Zoom out"><Minus size={16} /></button>
+                <span className="mono">{Math.round(timelinePxPerHour)} px/h</span>
+                <button className="iconBtn" onClick={() => zoomIn()} aria-label="Zoom in"><Plus size={16} /></button>
+                <button className="iconBtn" onClick={() => zoomReset()} aria-label="Reset zoom"><TimerReset size={16} /></button>
+              </div>
+              <button className="iconBtn" onClick={openTimelineExportDialog} aria-label="Export timeline"><Download size={18} /></button>
+            </> : null}
+            {view === 'journal' ? <>
+              <button className="btn" onClick={() => setJournalDrawerOpen((open) => !open)}><Sparkles size={16} /> Draft tools</button>
+              <button className="btn" onClick={() => void onJournalExportRange(dayKey, dayKey)}><Download size={16} /> Export</button>
+            </> : null}
+            {view === 'settings' ? <button className="btn" onClick={() => setView('onboarding')}><CircleHelp size={16} /> Setup guide</button> : null}
           </div>
-          <button className="btn" onClick={() => shiftDay(-1)}>
-            Prev
-          </button>
-           <button
-             className="btn"
-             onClick={() => setDayKey(dayKeyFromUnixSeconds(Math.floor(Date.now() / 1000)))}
-           >
-             Today
-           </button>
-           <button className="btn" onClick={onNow}>
-             Now
-           </button>
-           <button className="btn" onClick={() => shiftDay(1)}>
-             Next
-           </button>
-          <input
-            className="input"
-            type="date"
-            value={dayKey}
-            onChange={(e) => setDayKey(e.target.value)}
-          />
-          <button className="btn" onClick={() => void (view === 'journal' ? onJournalCopyDay() : onCopyDay())}>
-            {view === 'journal' ? 'Copy Journal' : 'Copy Timeline'}
-          </button>
-          <button
-            className="btn"
-            onClick={() => void (view === 'journal' ? onJournalExportRange(dayKey, dayKey) : openTimelineExportDialog())}
-          >
-            {view === 'journal' ? 'Export Journal' : 'Export Timeline'}
-          </button>
         </div>
-      </header>
+      ) : null}
 
       {exportDialogOpen && view !== 'journal' ? (
         <div
@@ -1478,163 +1493,56 @@ export function App() {
           </section>
         ) : view === 'timeline' ? (
           <section className="timeline">
+            <div className="timelineOverview" aria-label="Day overview">
+              <div className="overviewMetric"><span>Tracked time</span><strong>{formatDurationCompact(dayOverview.trackedSeconds)}</strong></div>
+              <div className="overviewMetric"><span>Review coverage</span><strong>{Math.round(dayOverview.coverage * 100)}%</strong></div>
+              <div className="overviewMetric categoryMetric">
+                <span>Categories</span>
+                <div className="categoryDistribution" aria-label="Category distribution">
+                  {dayOverview.categories.length ? dayOverview.categories.map(([category, seconds]) => (
+                    <i key={category} title={`${category}: ${formatDurationCompact(seconds)}`} style={{ flexGrow: seconds, background: getCategoryColor(category, categoryColorsByName) }} />
+                  )) : <i className="empty" />}
+                </div>
+              </div>
+              <button className="overviewMetric reviewMetric" onClick={() => setView('review')}>
+                <span>Remaining review</span><strong>{dayOverview.remaining}</strong>
+              </button>
+            </div>
+
             <div className="timelineControls">
-              <div className="timelineControlsRow">
-                <div className="field" style={{ minWidth: 260, flex: 1 }}>
-                  <div className="label">Search</div>
-                  <input
-                    ref={timelineSearchInputRef}
-                    className="input"
-                    placeholder="Search timeline…"
-                    value={timelineSearchQuery}
-                    onChange={(e) => setTimelineSearchQuery(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Escape') {
-                        e.preventDefault()
-                        setTimelineSearchQuery('')
-                        ;(e.currentTarget as any).blur?.()
-                      }
-                    }}
-                  />
-                </div>
-
-                <div className="field" style={{ minWidth: 180 }}>
-                  <div className="label">Scope</div>
-                  <select
-                    className="input"
-                    value={timelineSearchScopePreset}
-                    onChange={(e) => setTimelineSearchScopePreset(e.target.value as any)}
-                  >
-                    <option value="day">Selected day</option>
-                    <option value="today">Today</option>
-                    <option value="yesterday">Yesterday</option>
-                    <option value="last7">Last 7 days</option>
-                    <option value="last30">Last 30 days</option>
-                    <option value="all">All time</option>
-                  </select>
-                </div>
-
-                <div className="row" style={{ alignSelf: 'end' }}>
-                  <button
-                    className="btn"
-                    onClick={() => {
-                      setTimelineSearchQuery('')
-                      setTimelineFilters({
-                        includeSystem: true,
-                        onlyErrors: false,
-                        hasVideo: false,
-                        hasDetails: false,
-                        categories: []
-                      })
-                    }}
-                  >
-                    Clear
-                  </button>
-                </div>
-
-                <div className="row" style={{ alignSelf: 'end', flexWrap: 'wrap' }}>
-                  <label className="pill">
-                    <input
-                      type="checkbox"
-                      checked={!!timelineFilters.includeSystem}
-                      disabled={!!timelineFilters.onlyErrors}
-                      onChange={(e) =>
-                        setTimelineFilters((prev) => ({
-                          ...prev,
-                          includeSystem: e.target.checked
-                        }))
-                      }
-                    />
-                    Include System
-                  </label>
-                  <label className="pill">
-                    <input
-                      type="checkbox"
-                      checked={!!timelineFilters.onlyErrors}
-                      onChange={(e) =>
-                        setTimelineFilters((prev) => ({
-                          ...prev,
-                          onlyErrors: e.target.checked,
-                          includeSystem: e.target.checked ? true : prev.includeSystem
-                        }))
-                      }
-                    />
-                    Only errors
-                  </label>
-                  <label className="pill">
-                    <input
-                      type="checkbox"
-                      checked={!!timelineFilters.hasVideo}
-                      onChange={(e) =>
-                        setTimelineFilters((prev) => ({
-                          ...prev,
-                          hasVideo: e.target.checked
-                        }))
-                      }
-                    />
-                    Has video
-                  </label>
-                  <label className="pill">
-                    <input
-                      type="checkbox"
-                      checked={!!timelineFilters.hasDetails}
-                      onChange={(e) =>
-                        setTimelineFilters((prev) => ({
-                          ...prev,
-                          hasDetails: e.target.checked
-                        }))
-                      }
-                    />
-                    Has details
-                  </label>
-                </div>
+              <div className="searchField">
+                <Search size={16} aria-hidden="true" />
+                <input ref={timelineSearchInputRef} placeholder="Search this day or choose a range…" value={timelineSearchQuery}
+                  onChange={(e) => setTimelineSearchQuery(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === 'Escape') { setTimelineSearchQuery(''); e.currentTarget.blur() } }} />
+                {timelineSearchQuery ? <button className="searchClear" onClick={() => setTimelineSearchQuery('')} aria-label="Clear search">×</button> : null}
               </div>
-
-              <div className="timelineControlsRow">
-                <div className="row" style={{ flexWrap: 'wrap' }}>
-                  {[...categoryNamesOrdered, 'System'].map((cat) => {
-                    const active = (timelineFilters.categories ?? []).includes(cat)
-                    return (
-                      <button
-                        key={cat}
-                        className={`chip ${active ? 'chip-active' : ''}`}
-                        onClick={() => {
-                          setTimelineFilters((prev) => {
-                            const cur = new Set(prev.categories ?? [])
-                            if (cur.has(cat)) cur.delete(cat)
-                            else cur.add(cat)
-                            const nextCats = [...cur]
-                            const includeSystem =
-                              prev.onlyErrors || prev.includeSystem || nextCats.includes('System')
-                            return {
-                              ...prev,
-                              includeSystem,
-                              categories: nextCats
-                            }
-                          })
-                        }}
-                        type="button"
-                      >
-                        {cat}
-                      </button>
-                    )
-                  })}
-                </div>
+              <select className="input scopeSelect" value={timelineSearchScopePreset} onChange={(e) => setTimelineSearchScopePreset(e.target.value as any)} aria-label="Search range">
+                <option value="day">Selected day</option><option value="today">Today</option><option value="yesterday">Yesterday</option>
+                <option value="last7">Last 7 days</option><option value="last30">Last 30 days</option><option value="all">All time</option>
+              </select>
+              <div className="filterAnchor">
+                <button className={`btn ${timelineFiltersOpen ? 'active' : ''}`} onClick={() => setTimelineFiltersOpen((open) => !open)}>
+                  Filters{(timelineFilters.categories?.length ?? 0) + Number(!!timelineFilters.onlyErrors) + Number(!!timelineFilters.hasVideo) + Number(!!timelineFilters.hasDetails) > 0 ? ` · ${(timelineFilters.categories?.length ?? 0) + Number(!!timelineFilters.onlyErrors) + Number(!!timelineFilters.hasVideo) + Number(!!timelineFilters.hasDetails)}` : ''}
+                </button>
+                {timelineFiltersOpen ? (
+                  <div className="filterPopover" role="dialog" aria-label="Timeline filters">
+                    <div className="popoverTitle">Filter activities</div>
+                    <label><input type="checkbox" checked={!!timelineFilters.includeSystem} disabled={!!timelineFilters.onlyErrors} onChange={(e) => setTimelineFilters((p) => ({ ...p, includeSystem: e.target.checked }))} /> Include system activity</label>
+                    <label><input type="checkbox" checked={!!timelineFilters.onlyErrors} onChange={(e) => setTimelineFilters((p) => ({ ...p, onlyErrors: e.target.checked, includeSystem: e.target.checked || p.includeSystem }))} /> Processing errors only</label>
+                    <label><input type="checkbox" checked={!!timelineFilters.hasVideo} onChange={(e) => setTimelineFilters((p) => ({ ...p, hasVideo: e.target.checked }))} /> Has timelapse</label>
+                    <label><input type="checkbox" checked={!!timelineFilters.hasDetails} onChange={(e) => setTimelineFilters((p) => ({ ...p, hasDetails: e.target.checked }))} /> Has details</label>
+                    <div className="filterCategories">
+                      {[...categoryNamesOrdered, 'System'].map((cat) => {
+                        const active = (timelineFilters.categories ?? []).includes(cat)
+                        return <button key={cat} className={`chip ${active ? 'chip-active' : ''}`} onClick={() => setTimelineFilters((p) => ({ ...p, categories: active ? (p.categories ?? []).filter((x) => x !== cat) : [...(p.categories ?? []), cat] }))}>{cat}</button>
+                      })}
+                    </div>
+                    <button className="btn btn-quiet" onClick={() => setTimelineFilters({ includeSystem: true, onlyErrors: false, hasVideo: false, hasDetails: false, categories: [] })}>Reset filters</button>
+                  </div>
+                ) : null}
               </div>
-
-              {timelineSearchScopePreset !== 'day' ? (
-                <div className="timelineControlsMeta">
-                  {timelineSearchLoading
-                    ? 'Searching…'
-                    : timelineSearchError
-                      ? `Search error: ${timelineSearchError}`
-                      : `${timelineSearchHits.length} result${timelineSearchHits.length === 1 ? '' : 's'}`}
-                </div>
-              ) : timelineSearchQuery.trim() || (timelineFilters.categories ?? []).length > 0 || timelineFilters.hasVideo || timelineFilters.hasDetails || timelineFilters.onlyErrors ? (
-                <div className="timelineControlsMeta">
-                  Showing {visibleDayCards.length} card{visibleDayCards.length === 1 ? '' : 's'}
-                </div>
-              ) : null}
+              <span className="timelineControlsMeta">{timelineSearchScopePreset !== 'day' ? timelineSearchLoading ? 'Searching…' : `${timelineSearchHits.length} results` : `${visibleDayCards.length} activities`}</span>
             </div>
 
             <div className="timelineScroll" ref={timelineScrollRef}>
@@ -1694,8 +1602,14 @@ export function App() {
                           style={{
                             ...layout.style,
                             ['--catColor' as any]: getCategoryColor(c.category, categoryColorsByName)
-                          }}
+                         }}
                          onClick={() => setSelectedCardId(c.id)}
+                         onKeyDown={(event) => {
+                           if (event.key === 'Enter' || event.key === ' ') {
+                             event.preventDefault()
+                             setSelectedCardId(c.id)
+                           }
+                         }}
                          role="button"
                          tabIndex={0}
                        >
@@ -1721,7 +1635,13 @@ export function App() {
           <section className="timeline">
             <div className="timelineScroll">
               <div className="reviewList">
-                {renderReviewList(cards, reviewCoverage, (card, rating) => void onApplyRating(card, rating))}
+                {renderReviewList(
+                  cards,
+                  reviewCoverage,
+                  reviewSkipped,
+                  (card, rating) => void onApplyRating(card, rating),
+                  (card) => setReviewSkipped((previous) => new Set(previous).add(card.id))
+                )}
               </div>
             </div>
           </section>
@@ -1812,6 +1732,9 @@ export function App() {
                 </div>
 
                 <div className="askComposer">
+                  <select className="askScope" value={askScopePreset} disabled={askLoading} onChange={(e) => setAskScopePreset(e.target.value as any)} aria-label="Ask scope">
+                    <option value="day">This day</option><option value="today">Today</option><option value="yesterday">Yesterday</option><option value="last7">7 days</option><option value="last30">30 days</option>
+                  </select>
                   <textarea
                     className="input askInput"
                     rows={2}
@@ -1828,6 +1751,14 @@ export function App() {
                   <button className="btn btn-accent" disabled={askLoading} onClick={() => void onRunAsk(askInput)}>
                     Ask
                   </button>
+                  <details className="askOptions">
+                    <summary aria-label="Ask options">•••</summary>
+                    <div>
+                      <label><input type="checkbox" checked={askUseObservations} onChange={(e) => setAskUseObservations(e.target.checked)} /> Use observations</label>
+                      <label><input type="checkbox" checked={askIncludeReview} onChange={(e) => setAskIncludeReview(e.target.checked)} /> Include review ratings</label>
+                      <button className="btn btn-quiet" disabled={!askMessages.length} onClick={() => { setAskMessages([]); setAskFollowUps([]); setAskError(null) }}>Clear conversation</button>
+                    </div>
+                  </details>
                 </div>
                 <div className="askHint mono">Tip: Cmd/Ctrl+Enter to send</div>
               </div>
@@ -1905,6 +1836,8 @@ export function App() {
           <section className="timeline">
             <div className="timelineScroll">
                 <SettingsView
+                  appearanceMode={appearanceMode}
+                  onChangeAppearance={onChangeAppearance}
                   statusLine={statusLine}
                   recording={recording}
                   systemPaused={systemPaused}
@@ -1997,7 +1930,7 @@ export function App() {
           </section>
         )}
 
-        <aside className="side">
+        <aside className={`side side--${view}`}>
           {view === 'onboarding' ? (
             <div className="sidePanel">
               <div className="sideTitle">Setup status</div>
@@ -2131,7 +2064,7 @@ export function App() {
                 </div>
               </div>
             </div>
-          ) : view === 'journal' ? (
+          ) : view === 'journal' && journalDrawerOpen ? (
             <div className="sidePanel">
               <div className="sideTitle">Journal tools</div>
               <div className="sideMeta">Draft with Gemini uses timeline text (and optionally observations).</div>
@@ -2288,9 +2221,12 @@ export function App() {
                 </div>
               ) : null}
             </div>
-          ) : selectedCard ? (
+          ) : view === 'timeline' && selectedCard ? (
             <div className="sidePanel">
-              <div className="sideTitle">{selectedCard.title}</div>
+              <div className="drawerHeader">
+                <div className="sideTitle">{selectedCard.title}</div>
+                <button className="iconBtn" onClick={() => setSelectedCardId(null)} aria-label="Close activity details">×</button>
+              </div>
               <div className="sideMeta">
                 {formatClockAscii(selectedCard.startTs)} - {formatClockAscii(selectedCard.endTs)}
               </div>
@@ -2428,33 +2364,7 @@ export function App() {
                 ) : null}
               </div>
             </div>
-          ) : (
-            <div className="sidePanel">
-              <div className="sideTitle">Quick capture</div>
-              <div className="sideMeta">{statusLine}</div>
-
-              <div className="row">
-                <button className="btn btn-accent" onClick={onToggleRecording}>
-                  {recording ? 'Stop recording' : 'Start recording'}
-                </button>
-                <button className="btn" onClick={() => setView('settings')}>
-                  Settings
-                </button>
-              </div>
-
-              {systemPaused ? (
-                <div className="row">
-                  <div className="pill">System paused (sleep/lock)</div>
-                </div>
-              ) : null}
-
-              {lastError ? (
-                <div className="row">
-                  <div className="mono error">Last capture error: {lastError}</div>
-                </div>
-              ) : null}
-            </div>
-          )}
+          ) : null}
         </aside>
       </main>
     </div>
@@ -2539,6 +2449,24 @@ export function App() {
     setView('timeline')
     setDayKey(s.dayKey)
   }
+}
+
+function formatLongDate(dayKey: string): string {
+  const date = new Date(`${dayKey}T12:00:00`)
+  return new Intl.DateTimeFormat(undefined, {
+    weekday: 'long',
+    month: 'long',
+    day: 'numeric',
+    year: 'numeric'
+  }).format(date)
+}
+
+function formatDurationCompact(seconds: number): string {
+  const hours = Math.floor(seconds / 3600)
+  const minutes = Math.round((seconds % 3600) / 60)
+  if (hours && minutes) return `${hours}h ${minutes}m`
+  if (hours) return `${hours}h`
+  return `${minutes}m`
 }
 
 function addDaysToDayKey(dayKey: string, deltaDays: number): string {
@@ -2778,12 +2706,15 @@ function renderTimeTicks(windowStartTs: number, pxPerHourRaw: number) {
 function renderReviewList(
   cards: TimelineCardDTO[],
   coverage: Record<number, number>,
-  onRate: (card: TimelineCardDTO, rating: 'focus' | 'neutral' | 'distracted') => void
+  skipped: Set<number>,
+  onRate: (card: TimelineCardDTO, rating: 'focus' | 'neutral' | 'distracted') => void,
+  onSkip: (card: TimelineCardDTO) => void
 ) {
   const rows = cards
     .filter((c) => c.category !== 'System')
     .map((card) => ({ card, coverage: coverage[card.id] ?? 0 }))
     .filter((x) => x.coverage < 0.8)
+    .filter((x) => !skipped.has(x.card.id))
     .sort((a, b) => a.card.startTs - b.card.startTs)
 
   if (rows.length === 0) {
@@ -2798,13 +2729,18 @@ function renderReviewList(
   return (
     <div className="reviewWrap">
       <div className="reviewHeader">
-        <div className="sideTitle">Review</div>
-        <div className="sideMeta">Rate cards until coverage reaches 80%.</div>
+        <div>
+          <div className="eyebrow">Daily review queue</div>
+          <div className="sideTitle">One moment at a time</div>
+          <div className="sideMeta">{rows.length} activit{rows.length === 1 ? 'y' : 'ies'} remaining</div>
+        </div>
+        <div className="reviewProgress" aria-label={`${rows.length} activities remaining`}><span style={{ width: `${Math.max(8, 100 / rows.length)}%` }} /></div>
       </div>
 
-      {rows.map(({ card, coverage }) => (
-        <div key={card.id} className="reviewRow">
+      {rows.slice(0, 1).map(({ card, coverage }) => (
+        <div key={card.id} className="reviewRow reviewRow--current">
           <div className="reviewRowMain">
+            <div className="reviewContext"><span className="categoryAccent" style={{ background: getCategoryColor(card.category) }} />{card.category}</div>
             <div className="reviewRowTitle">{card.title}</div>
             <div className="reviewRowMeta">
               {formatClockAscii(card.startTs)} - {formatClockAscii(card.endTs)} · {card.category}
@@ -2812,7 +2748,7 @@ function renderReviewList(
             </div>
           </div>
           <div className="reviewRowActions">
-            <button className="btn" onClick={() => onRate(card, 'focus')}>
+            <button className="btn reviewFocus" onClick={() => onRate(card, 'focus')}>
               Focus
             </button>
             <button className="btn" onClick={() => onRate(card, 'neutral')}>
@@ -2821,9 +2757,16 @@ function renderReviewList(
             <button className="btn" onClick={() => onRate(card, 'distracted')}>
               Distracted
             </button>
+            <button className="btn btn-quiet" onClick={() => onSkip(card)}>Skip</button>
           </div>
         </div>
       ))}
+      {rows.length > 1 ? (
+        <div className="reviewUpcoming">
+          <div className="eyebrow">Up next</div>
+          {rows.slice(1, 5).map(({ card }) => <div key={card.id}><span className="mono">{formatClockAscii(card.startTs)}</span><span>{card.title}</span></div>)}
+        </div>
+      ) : null}
     </div>
   )
 }

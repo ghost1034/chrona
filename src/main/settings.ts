@@ -5,7 +5,8 @@ import type { BlurRegion } from '../shared/blurRegions'
 import type { Settings } from '../shared/ipc'
 
 const DEFAULT_SETTINGS: Settings = {
-  version: 10,
+  version: 11,
+  appearanceMode: 'system',
   captureIntervalSeconds: 10,
   captureSelectedDisplayId: null,
   captureIncludeCursor: false,
@@ -58,7 +59,7 @@ const DEFAULT_SETTINGS: Settings = {
   timelapsesEnabled: true,
   timelapseFps: 2,
   autoStartEnabled: false,
-  timelinePxPerHour: 600,
+  timelinePxPerHour: 180,
 
   geminiModel: 'gemini-3.5-flash',
   geminiRequestTimeoutMs: 60_000,
@@ -119,14 +120,23 @@ export class SettingsStore {
         parsed?.version !== 7 &&
         parsed?.version !== 8 &&
         parsed?.version !== 9 &&
-        parsed?.version !== 10
+        parsed?.version !== 10 &&
+        parsed?.version !== 11
       ) {
         return DEFAULT_SETTINGS
       }
 
       // Migration: do not force onboarding UI for existing users.
       const fromExistingUser = parsed?.version <= 5
-      const merged: Settings = { ...DEFAULT_SETTINGS, ...parsed, version: 10 }
+      const merged: Settings = { ...DEFAULT_SETTINGS, ...parsed, version: 11 }
+      // Version 10 shipped with 600px/hour as the implicit default. Move only
+      // that legacy default to the calmer product default; explicit choices survive.
+      if (parsed?.version === 10 && parsed?.timelinePxPerHour === 600) {
+        merged.timelinePxPerHour = 180
+      }
+      if (!['system', 'light', 'dark'].includes(String(parsed?.appearanceMode ?? ''))) {
+        merged.appearanceMode = 'system'
+      }
       if (fromExistingUser && typeof (parsed as any).onboardingCompleted !== 'boolean') {
         merged.onboardingCompleted = true
       }
@@ -148,7 +158,7 @@ export class SettingsStore {
     const next: Settings = {
       ...current,
       ...patch,
-      version: 10
+      version: 11
     }
 
     await fs.mkdir(path.dirname(this.filePath), { recursive: true })

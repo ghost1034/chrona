@@ -16,6 +16,8 @@ const GEMINI_MODELS = [
 type DisplayInfo = { id: string; bounds: { width: number; height: number }; scaleFactor: number }
 
 export function SettingsView(props: {
+  appearanceMode: 'system' | 'light' | 'dark'
+  onChangeAppearance: (mode: 'system' | 'light' | 'dark') => Promise<void>
   statusLine: string
   recording: boolean
   systemPaused: boolean
@@ -121,19 +123,18 @@ export function SettingsView(props: {
 }) {
   const sections = useMemo(
     () => [
-      { id: 'capture', label: 'Capture' },
+      { id: 'general', label: 'General' },
+      { id: 'capture', label: 'Capture & Privacy' },
       { id: 'timeline', label: 'Timeline' },
-      { id: 'analysis', label: 'Analysis' },
-      { id: 'ai', label: 'AI (Gemini)' },
-      { id: 'prompts', label: 'Prompts' },
-      { id: 'storage', label: 'Storage' },
+      { id: 'ai', label: 'AI' },
+      { id: 'storage', label: 'Data & Storage' },
       { id: 'sync', label: 'Sync' },
-      { id: 'app', label: 'App' }
+      { id: 'advanced', label: 'Advanced' }
     ],
     []
   )
 
-  const [active, setActive] = useState<string>('capture')
+  const [active, setActive] = useState<string>('general')
 
   const [catErr, setCatErr] = useState<string | null>(null)
   const [catBusy, setCatBusy] = useState<boolean>(false)
@@ -222,6 +223,30 @@ export function SettingsView(props: {
       </div>
 
       <div className="settingsBody">
+        {active === 'general' ? (
+          <div className="settingsSection">
+            <div className="sideTitle">General</div>
+            <div className="sideMeta">Appearance and desktop behavior.</div>
+            <div className="block">
+              <div className="sideTitle">Appearance</div>
+              <div className="segmented appearanceControl" aria-label="Appearance theme">
+                {(['system', 'light', 'dark'] as const).map((mode) => (
+                  <button key={mode} className={props.appearanceMode === mode ? 'active' : ''} onClick={() => void props.onChangeAppearance(mode)}>
+                    {mode[0].toUpperCase() + mode.slice(1)}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div className="block">
+              <div className="sideTitle">Startup</div>
+              <label className="switchRow">
+                <span><strong>Launch at login</strong><small>Keep Chrona ready when you sign in.</small></span>
+                <input type="checkbox" checked={props.autoStartEnabled} onChange={(e) => void props.onToggleAutoStartEnabled(e.target.checked)} />
+              </label>
+            </div>
+          </div>
+        ) : null}
+
         {active === 'capture' ? (
           <div className="settingsSection">
             <div className="sideTitle">Capture</div>
@@ -784,7 +809,7 @@ export function SettingsView(props: {
           </div>
         ) : null}
 
-        {active === 'analysis' ? (
+        {active === 'advanced' ? (
           <div className="settingsSection">
             <div className="sideTitle">Analysis</div>
             <div className="sideMeta">
@@ -1034,7 +1059,7 @@ export function SettingsView(props: {
           </div>
         ) : null}
 
-        {active === 'prompts' ? (
+        {active === 'advanced' ? (
           <div className="settingsSection">
             <div className="sideTitle">Prompts</div>
             <div className="sideMeta">
@@ -1176,23 +1201,6 @@ export function SettingsView(props: {
 
         {active === 'sync' ? <SyncSettings /> : null}
 
-        {active === 'app' ? (
-          <div className="settingsSection">
-            <div className="sideTitle">App</div>
-            <div className="sideMeta">System integration and behavior.</div>
-
-            <div className="row">
-              <label className="pill">
-                <input
-                  type="checkbox"
-                  checked={props.autoStartEnabled}
-                  onChange={(e) => void props.onToggleAutoStartEnabled(e.target.checked)}
-                />
-                Launch at login
-              </label>
-            </div>
-          </div>
-        ) : null}
       </div>
     </div>
   )

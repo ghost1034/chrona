@@ -4,7 +4,8 @@ export type AppPingResponse = {
 }
 
 export type Settings = {
-  version: 10
+  version: 11
+  appearanceMode: 'system' | 'light' | 'dark'
   captureIntervalSeconds: number
   captureSelectedDisplayId: string | null
   captureIncludeCursor: boolean
