@@ -5,7 +5,8 @@ import type { BlurRegion } from '../shared/blurRegions'
 import type { Settings } from '../shared/ipc'
 
 const DEFAULT_SETTINGS: Settings = {
-  version: 10,
+  version: 11,
+  themePreference: 'system',
   captureIntervalSeconds: 10,
   captureSelectedDisplayId: null,
   captureIncludeCursor: false,
@@ -119,14 +120,18 @@ export class SettingsStore {
         parsed?.version !== 7 &&
         parsed?.version !== 8 &&
         parsed?.version !== 9 &&
-        parsed?.version !== 10
+        parsed?.version !== 10 &&
+        parsed?.version !== 11
       ) {
         return DEFAULT_SETTINGS
       }
 
       // Migration: do not force onboarding UI for existing users.
       const fromExistingUser = parsed?.version <= 5
-      const merged: Settings = { ...DEFAULT_SETTINGS, ...parsed, version: 10 }
+      const merged: Settings = { ...DEFAULT_SETTINGS, ...parsed, version: 11 }
+      if (!['system', 'light', 'dark'].includes(String(parsed?.themePreference ?? ''))) {
+        merged.themePreference = 'system'
+      }
       if (fromExistingUser && typeof (parsed as any).onboardingCompleted !== 'boolean') {
         merged.onboardingCompleted = true
       }
@@ -148,7 +153,7 @@ export class SettingsStore {
     const next: Settings = {
       ...current,
       ...patch,
-      version: 10
+      version: 11
     }
 
     await fs.mkdir(path.dirname(this.filePath), { recursive: true })

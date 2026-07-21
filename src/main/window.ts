@@ -34,10 +34,12 @@ function isAllowedAppNavigationUrl(urlString: string): boolean {
 
 export async function createMainWindow(): Promise<BrowserWindow> {
   const win = new BrowserWindow({
-    width: 1120,
-    height: 720,
+    width: 1280,
+    height: 820,
+    minWidth: 960,
+    minHeight: 640,
     show: false,
-    backgroundColor: '#0e1116',
+    backgroundColor: '#f5f2ec',
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,

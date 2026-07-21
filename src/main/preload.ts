@@ -1,6 +1,7 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import type { IpcContract } from '../shared/ipc'
 import { IPC_EVENTS } from '../shared/ipc'
+import type { NavigationEventPayload } from '../shared/navigation'
 
 type Invoke = <K extends keyof IpcContract>(
   channel: K,
@@ -165,8 +166,8 @@ contextBridge.exposeInMainWorld('chrona', {
     return () => ipcRenderer.removeListener(IPC_EVENTS.blurRegionsChanged, listener)
   },
 
-  onNavigate: (cb: (payload: { view: string }) => void) => {
-    const listener = (_event: unknown, payload: { view: string }) => cb(payload)
+  onNavigate: (cb: (payload: NavigationEventPayload) => void) => {
+    const listener = (_event: unknown, payload: NavigationEventPayload) => cb(payload)
     ipcRenderer.on(IPC_EVENTS.navigate, listener)
     return () => ipcRenderer.removeListener(IPC_EVENTS.navigate, listener)
   }
@@ -295,5 +296,5 @@ export type ChronaApi = {
 
   onBlurRegionsChanged: (cb: () => void) => () => void
 
-  onNavigate: (cb: (payload: { view: string }) => void) => () => void
+  onNavigate: (cb: (payload: NavigationEventPayload) => void) => () => void
 }

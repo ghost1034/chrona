@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react'
+import type { ReactNode } from 'react'
 import type {
   TimelineCardDTO,
   TimelineSearchFiltersDTO,
@@ -18,8 +19,15 @@ import { DashboardView } from './DashboardView'
 import { SettingsView } from './SettingsView'
 import { OnboardingView } from './OnboardingView'
 import { Markdown } from './Markdown'
+import { TodayView } from './TodayView'
+import {
+  routeFromNavigationEvent,
+  routeReducer,
+  type RendererRoute
+} from '../shared/navigation'
 
 type DisplayInfo = { id: string; bounds: { width: number; height: number }; scaleFactor: number }
+type View = 'today' | 'timeline' | 'review' | 'ask' | 'dashboard' | 'journal' | 'settings' | 'onboarding'
 
 const HOURS_IN_TIMELINE = 24
 const TIMELINE_GRID_PADDING_PX = 16
@@ -115,12 +123,18 @@ export function App() {
   const timelineSearchReqKeyRef = useRef<string>('')
   const timelineSearchRunIdRef = useRef<number>(0)
   const [selectedCardId, setSelectedCardId] = useState<number | null>(null)
-  const [view, setView] = useState<
-    'timeline' | 'review' | 'ask' | 'dashboard' | 'journal' | 'settings' | 'onboarding'
-  >(
-    'timeline'
-  )
+  const [route, dispatchRoute] = useReducer(routeReducer, { name: 'today' } satisfies RendererRoute)
+  const view: View = route.name === 'insights' ? 'dashboard' : route.name
+  const setView = useCallback((next: View) => {
+    dispatchRoute({
+      type: 'navigate',
+      target: next === 'dashboard' ? { name: 'insights' } : { name: next }
+    })
+  }, [])
   const [reviewCoverage, setReviewCoverage] = useState<Record<number, number>>({})
+  const [themePreference, setThemePreference] = useState<'system' | 'light' | 'dark'>('system')
+  const [timelineFiltersOpen, setTimelineFiltersOpen] = useState<boolean>(false)
+  const [secondaryPanelOpen, setSecondaryPanelOpen] = useState<boolean>(false)
 
   const [timelinePxPerHour, setTimelinePxPerHour] = useState<number>(TIMELINE_ZOOM_DEFAULT_PX_PER_HOUR)
   const timelineScrollRef = useRef<HTMLDivElement | null>(null)
@@ -259,6 +273,7 @@ export function App() {
       await refreshSetupStatus()
 
       const settings = await window.chrona.getSettings()
+      setThemePreference(settings.themePreference ?? 'system')
       setCategoryDefs(Array.isArray((settings as any).categories) ? ((settings as any).categories as any) : [])
       setSubcategoryDefs(
         Array.isArray((settings as any).subcategories) ? ((settings as any).subcategories as any) : []
@@ -330,9 +345,16 @@ export function App() {
     })
 
     const unsubNav = window.chrona.onNavigate((p) => {
-      const v = String((p as any)?.view ?? '')
-      if (v === 'settings') setView('settings')
-      if (v === 'onboarding') setView('onboarding')
+      const target = routeFromNavigationEvent(p)
+      if (!target) return
+      if ('dayKey' in target && target.dayKey) setDayKey(target.dayKey)
+      if (target.name === 'timeline' && target.cardId) {
+        pendingJumpRef.current = {
+          dayKey: target.dayKey ?? dayKeyRef.current,
+          cardId: target.cardId
+        }
+      }
+      dispatchRoute({ type: 'navigate', target })
     })
 
     return () => {
@@ -343,6 +365,39 @@ export function App() {
       unsubNav()
     }
   }, [])
+
+  useEffect(() => {
+    const media = window.matchMedia('(prefers-color-scheme: dark)')
+    const apply = () => {
+      const resolved = themePreference === 'system' ? (media.matches ? 'dark' : 'light') : themePreference
+      document.documentElement.dataset.theme = resolved
+      document.documentElement.style.colorScheme = resolved
+    }
+    apply()
+    media.addEventListener('change', apply)
+    return () => media.removeEventListener('change', apply)
+  }, [themePreference])
+
+  useEffect(() => {
+    setTimelineFiltersOpen(false)
+    setSecondaryPanelOpen(false)
+  }, [view])
+
+  useEffect(() => {
+    const onEscape = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return
+      if (exportDialogOpen) {
+        setExportDialogOpen(false)
+        return
+      }
+      if (secondaryPanelOpen || selectedCardId !== null) {
+        setSecondaryPanelOpen(false)
+        setSelectedCardId(null)
+      }
+    }
+    window.addEventListener('keydown', onEscape)
+    return () => window.removeEventListener('keydown', onEscape)
+  }, [exportDialogOpen, secondaryPanelOpen, selectedCardId])
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
@@ -1241,120 +1296,94 @@ export function App() {
 
   return (
     <div className="app">
-      <header className="header">
-        <div className="brandCluster">
-          <div className="brand">
-            <div className="wordmark">Chrona</div>
-            <div className="tagline">
-              {view === 'onboarding'
-                ? 'Setup'
-                : view === 'ask'
-                  ? 'Ask Chrona'
-                  : view === 'review'
-                    ? 'Review'
-                    : view === 'dashboard'
-                      ? 'Dashboard'
-                      : view === 'journal'
-                        ? `Journal · ${dayKey}`
-                        : `Timeline · ${dayKey}`}
-            </div>
-          </div>
-
+      <aside className="appSidebar" aria-label="Primary navigation">
+        <div className="sidebarBrand" aria-label="Chrona">
+          <span className="brandMark" aria-hidden="true">C</span>
+          <span className="sidebarWordmark">Chrona</span>
+        </div>
+        <nav className="primaryNav">
+          {([
+            ['today', 'Today', 'sun'],
+            ['timeline', 'Timeline', 'timeline'],
+            ['review', 'Review', 'check'],
+            ['dashboard', 'Insights', 'chart'],
+            ['ask', 'Ask Chrona', 'spark'],
+            ['journal', 'Journal', 'book']
+          ] as const).map(([target, label, icon]) => (
+            <button
+              key={target}
+              className={`navItem ${view === target ? 'active' : ''}`}
+              onClick={() => {
+                if (target === 'today') setDayKey(dayKeyFromUnixSeconds(Math.floor(Date.now() / 1000)))
+                setView(target)
+              }}
+              aria-current={view === target ? 'page' : undefined}
+              title={label}
+            >
+              <Icon name={icon} />
+              <span>{label}</span>
+            </button>
+          ))}
+        </nav>
+        <div className="sidebarBottom">
           <button
-            className={`btn recordingControl ${recording ? 'recordingControl-active' : ''}`}
-            onClick={onToggleRecording}
+            className={`captureStatus ${recording ? 'recording' : ''}`}
+            onClick={() => void onToggleRecording()}
             aria-pressed={recording}
-            title={recording ? 'Stop screen recording' : 'Start screen recording'}
+            title={recording ? 'Stop recording' : 'Start recording'}
           >
-            <span className="recordingControlDot" aria-hidden="true" />
-            {recording ? 'Stop recording' : 'Start recording'}
+            <span className="captureStatusDot" aria-hidden="true" />
+            <span className="captureStatusCopy">
+              <strong>{systemPaused ? 'System paused' : recording ? 'Recording' : 'Not recording'}</strong>
+              <small>{recording ? 'Click to stop' : 'Click to start'}</small>
+            </span>
+          </button>
+          <button className={`navItem ${view === 'settings' ? 'active' : ''}`} onClick={() => setView('settings')} title="Settings">
+            <Icon name="settings" /><span>Settings</span>
+            <kbd>{setupStatus?.platform === 'darwin' ? '⌘,' : 'Ctrl+,'}</kbd>
+          </button>
+          <button className="navItem" onClick={() => setView('onboarding')} title="Help and setup">
+            <Icon name="help" /><span>Help &amp; setup</span>
           </button>
         </div>
+      </aside>
 
-        <div className="toolbar">
-          <button
-            className={`btn ${view === 'onboarding' ? 'btn-accent' : ''}`}
-            onClick={() => setView('onboarding')}
-          >
-            Setup
-          </button>
-          <button
-            className={`btn ${view === 'timeline' ? 'btn-accent' : ''}`}
-            onClick={() => setView('timeline')}
-          >
-            Timeline
-          </button>
-          <button
-            className={`btn ${view === 'review' ? 'btn-accent' : ''}`}
-            onClick={() => setView('review')}
-          >
-            Review
-          </button>
-          <button className={`btn ${view === 'ask' ? 'btn-accent' : ''}`} onClick={() => setView('ask')}>
-            Ask
-          </button>
-          <button
-            className={`btn ${view === 'dashboard' ? 'btn-accent' : ''}`}
-            onClick={() => setView('dashboard')}
-          >
-            Dashboard
-          </button>
-          <button
-            className={`btn ${view === 'journal' ? 'btn-accent' : ''}`}
-            onClick={() => setView('journal')}
-          >
-            Journal
-          </button>
-          <button
-            className={`btn ${view === 'settings' ? 'btn-accent' : ''}`}
-            onClick={() => setView('settings')}
-          >
-            Settings
-          </button>
-          <button className="btn" disabled={view !== 'timeline'} onClick={() => zoomOut()}>
-            Zoom -
-          </button>
-          <button className="btn" disabled={view !== 'timeline'} onClick={() => zoomIn()}>
-            Zoom +
-          </button>
-          <button className="btn" disabled={view !== 'timeline'} onClick={() => zoomReset()}>
-            Reset
-          </button>
-          <div className="pill" title="Timeline zoom">
-            Zoom {Math.round((timelinePxPerHour / TIMELINE_ZOOM_DEFAULT_PX_PER_HOUR) * 100)}%
+      <div className="appWorkspace">
+        <header className="pageHeader">
+          <div className="pageTitleGroup">
+            <h1>{pageTitle(view)}</h1>
+            <p>{pageSubtitle(view, dayKey)}</p>
           </div>
-          <button className="btn" onClick={() => shiftDay(-1)}>
-            Prev
-          </button>
-           <button
-             className="btn"
-             onClick={() => setDayKey(dayKeyFromUnixSeconds(Math.floor(Date.now() / 1000)))}
-           >
-             Today
-           </button>
-           <button className="btn" onClick={onNow}>
-             Now
-           </button>
-           <button className="btn" onClick={() => shiftDay(1)}>
-             Next
-           </button>
-          <input
-            className="input"
-            type="date"
-            value={dayKey}
-            onChange={(e) => setDayKey(e.target.value)}
-          />
-          <button className="btn" onClick={() => void (view === 'journal' ? onJournalCopyDay() : onCopyDay())}>
-            {view === 'journal' ? 'Copy Journal' : 'Copy Timeline'}
-          </button>
-          <button
-            className="btn"
-            onClick={() => void (view === 'journal' ? onJournalExportRange(dayKey, dayKey) : openTimelineExportDialog())}
-          >
-            {view === 'journal' ? 'Export Journal' : 'Export Timeline'}
-          </button>
-        </div>
-      </header>
+          <div className="pageActions">
+            {(view === 'timeline' || view === 'review' || view === 'journal') ? (
+              <div className="dateNavigator" aria-label="Date navigation">
+                <button className="iconBtn" onClick={() => shiftDay(-1)} aria-label="Previous day"><Icon name="chevronLeft" /></button>
+                <input className="dateInput" aria-label="Selected date" type="date" value={dayKey} onChange={(e) => setDayKey(e.target.value)} />
+                <button className="iconBtn" onClick={() => shiftDay(1)} aria-label="Next day"><Icon name="chevronRight" /></button>
+              </div>
+            ) : null}
+            {view === 'timeline' ? (
+              <>
+                <div className="segmented" aria-label="Timeline zoom">
+                  <button onClick={() => zoomOut()} aria-label="Zoom out">−</button>
+                  <button onClick={() => zoomReset()} title="Reset zoom">{Math.round((timelinePxPerHour / TIMELINE_ZOOM_DEFAULT_PX_PER_HOUR) * 100)}%</button>
+                  <button onClick={() => zoomIn()} aria-label="Zoom in">+</button>
+                </div>
+                <button className={`btn ${timelineFiltersOpen ? 'btn-selected' : ''}`} aria-expanded={timelineFiltersOpen} onClick={() => setTimelineFiltersOpen((open) => !open)}><Icon name="filter" /> Filters</button>
+                <button className="iconBtn" onClick={openTimelineExportDialog} aria-label="Export timeline" title="Export timeline"><Icon name="export" /></button>
+              </>
+            ) : null}
+            {view === 'ask' ? <button className="btn" onClick={() => setSecondaryPanelOpen(true)}><Icon name="scope" /> Context used</button> : null}
+            {view === 'journal' ? (
+              <>
+                <span className="saveStatus" role="status"><span />{journalSaveLine || 'All changes saved'}</span>
+                <button className="btn" onClick={() => setSecondaryPanelOpen(true)}><Icon name="spark" /> Writing tools</button>
+                <button className="iconBtn" onClick={() => void onJournalExportRange(dayKey, dayKey)} aria-label="Export journal"><Icon name="export" /></button>
+              </>
+            ) : null}
+            {view === 'settings' ? <button className="btn" onClick={() => setView('onboarding')}>Run setup again</button> : null}
+          </div>
+        </header>
 
       {exportDialogOpen && view !== 'journal' ? (
         <div
@@ -1363,8 +1392,8 @@ export function App() {
             if (e.target === e.currentTarget) setExportDialogOpen(false)
           }}
         >
-          <div className="modal">
-            <div className="modalTitle">Export timeline</div>
+          <div className="modal" role="dialog" aria-modal="true" aria-labelledby="export-dialog-title">
+            <div className="modalTitle" id="export-dialog-title">Export timeline</div>
             <div className="modalMeta">Choose a date range and file format.</div>
 
             <div className="row">
@@ -1463,7 +1492,31 @@ export function App() {
       ) : null}
 
       <main className="layout">
-        {view === 'onboarding' ? (
+        {view === 'today' ? (
+          <section className="timeline todaySurface">
+            <div className="timelineScroll">
+              <TodayView
+                dayKey={dayKeyFromUnixSeconds(Math.floor(Date.now() / 1000))}
+                cards={cards}
+                categories={categoryDefs}
+                recording={recording}
+                systemPaused={systemPaused}
+                lastError={lastError}
+                hasGeminiKey={hasGeminiKey}
+                onToggleRecording={onToggleRecording}
+                onOpenTimeline={(cardId) => {
+                  const todayKey = dayKeyFromUnixSeconds(Math.floor(Date.now() / 1000))
+                  setDayKey(todayKey)
+                  setSelectedCardId(cardId ?? null)
+                  setView('timeline')
+                }}
+                onOpenReview={() => setView('review')}
+                onOpenJournal={() => setView('journal')}
+                onOpenSettings={() => setView('settings')}
+              />
+            </div>
+          </section>
+        ) : view === 'onboarding' ? (
           <section className="timeline">
             <div className="timelineScroll">
               <OnboardingView
@@ -1472,13 +1525,13 @@ export function App() {
                 onRefreshSetupStatus={refreshSetupStatus}
                 onMarkCompleted={markOnboardingComplete}
                 onStartRecording={onStartRecording}
-                onGoToTimeline={() => setView('timeline')}
+                onGoToTimeline={() => setView('today')}
               />
             </div>
           </section>
         ) : view === 'timeline' ? (
           <section className="timeline">
-            <div className="timelineControls">
+            <div className={`timelineControls ${timelineFiltersOpen ? 'filtersOpen' : ''}`}>
               <div className="timelineControlsRow">
                 <div className="field" style={{ minWidth: 260, flex: 1 }}>
                   <div className="label">Search</div>
@@ -1532,7 +1585,7 @@ export function App() {
                   </button>
                 </div>
 
-                <div className="row" style={{ alignSelf: 'end', flexWrap: 'wrap' }}>
+                <div className="row timelineQuickFilters" style={{ alignSelf: 'end', flexWrap: 'wrap' }}>
                   <label className="pill">
                     <input
                       type="checkbox"
@@ -1590,7 +1643,7 @@ export function App() {
                 </div>
               </div>
 
-              <div className="timelineControlsRow">
+              <div className="timelineControlsRow timelineCategoryFilters">
                 <div className="row" style={{ flexWrap: 'wrap' }}>
                   {[...categoryNamesOrdered, 'System'].map((cat) => {
                     const active = (timelineFilters.categories ?? []).includes(cat)
@@ -1696,6 +1749,12 @@ export function App() {
                             ['--catColor' as any]: getCategoryColor(c.category, categoryColorsByName)
                           }}
                          onClick={() => setSelectedCardId(c.id)}
+                         onKeyDown={(event) => {
+                           if (event.key === 'Enter' || event.key === ' ') {
+                             event.preventDefault()
+                             setSelectedCardId(c.id)
+                           }
+                         }}
                          role="button"
                          tabIndex={0}
                        >
@@ -1720,9 +1779,7 @@ export function App() {
         ) : view === 'review' ? (
           <section className="timeline">
             <div className="timelineScroll">
-              <div className="reviewList">
-                {renderReviewList(cards, reviewCoverage, (card, rating) => void onApplyRating(card, rating))}
-              </div>
+              <ReviewQueue cards={cards} coverage={reviewCoverage} onRate={(card, rating) => void onApplyRating(card, rating)} />
             </div>
           </section>
         ) : view === 'ask' ? (
@@ -1905,6 +1962,13 @@ export function App() {
           <section className="timeline">
             <div className="timelineScroll">
                 <SettingsView
+                  initialSection={route.name === 'settings' ? route.section : undefined}
+                  themePreference={themePreference}
+                  onChangeTheme={async (theme) => {
+                    setThemePreference(theme)
+                    await window.chrona.updateSettings({ themePreference: theme })
+                  }}
+                  onRunSetup={() => setView('onboarding')}
                   statusLine={statusLine}
                   recording={recording}
                   systemPaused={systemPaused}
@@ -1997,7 +2061,25 @@ export function App() {
           </section>
         )}
 
-        <aside className="side">
+        {(secondaryPanelOpen || (view === 'timeline' && !!selectedCard)) ? (
+          <button
+            className="drawerBackdrop"
+            aria-label="Close inspector"
+            onClick={() => {
+              setSecondaryPanelOpen(false)
+              if (view === 'timeline') setSelectedCardId(null)
+            }}
+          />
+        ) : null}
+        <aside className={`side ${(secondaryPanelOpen || (view === 'timeline' && !!selectedCard)) ? 'open' : ''}`} aria-label={view === 'timeline' ? 'Activity inspector' : 'Context panel'}>
+          <button
+            className="drawerClose iconBtn"
+            aria-label="Close panel"
+            onClick={() => {
+              setSecondaryPanelOpen(false)
+              if (view === 'timeline') setSelectedCardId(null)
+            }}
+          ><Icon name="close" /></button>
           {view === 'onboarding' ? (
             <div className="sidePanel">
               <div className="sideTitle">Setup status</div>
@@ -2457,6 +2539,7 @@ export function App() {
           )}
         </aside>
       </main>
+      </div>
     </div>
   )
 
@@ -2539,6 +2622,59 @@ export function App() {
     setView('timeline')
     setDayKey(s.dayKey)
   }
+}
+
+function pageTitle(view: View): string {
+  switch (view) {
+    case 'today': return 'Today'
+    case 'timeline': return 'Timeline'
+    case 'review': return 'Review'
+    case 'dashboard': return 'Insights'
+    case 'ask': return 'Ask Chrona'
+    case 'journal': return 'Journal'
+    case 'settings': return 'Settings'
+    case 'onboarding': return 'Welcome to Chrona'
+  }
+}
+
+function pageSubtitle(view: View, dayKey: string): string {
+  if (view === 'today') return formatFriendlyDay(dayKeyFromUnixSeconds(Math.floor(Date.now() / 1000)))
+  if (view === 'timeline') return `A detailed record of ${formatFriendlyDay(dayKey)}`
+  if (view === 'review') return `Build an honest picture of ${formatFriendlyDay(dayKey)}`
+  if (view === 'dashboard') return 'Patterns across your time and attention'
+  if (view === 'ask') return 'Explore your activity in your own words'
+  if (view === 'journal') return `A quiet space for ${formatFriendlyDay(dayKey)}`
+  if (view === 'settings') return 'Make Chrona work the way you do'
+  return 'Four small steps, then you’re ready'
+}
+
+function formatFriendlyDay(dayKey: string): string {
+  const date = new Date(`${dayKey}T12:00:00`)
+  return new Intl.DateTimeFormat(undefined, { weekday: 'long', month: 'long', day: 'numeric' }).format(date)
+}
+
+type IconName = 'sun' | 'timeline' | 'check' | 'chart' | 'spark' | 'book' | 'settings' | 'help' | 'chevronLeft' | 'chevronRight' | 'filter' | 'export' | 'scope' | 'close' | 'focus' | 'neutral' | 'distracted'
+
+function Icon({ name }: { name: IconName }) {
+  const paths: Record<IconName, ReactNode> = {
+    sun: <><circle cx="12" cy="12" r="3.5"/><path d="M12 2v2M12 20v2M4.93 4.93l1.42 1.42M17.65 17.65l1.42 1.42M2 12h2M20 12h2M4.93 19.07l1.42-1.42M17.65 6.35l1.42-1.42"/></>,
+    timeline: <><path d="M6 3v18M6 7h12M6 12h8M6 17h11"/><circle cx="6" cy="7" r="1.5"/><circle cx="6" cy="17" r="1.5"/></>,
+    check: <><path d="M5 12.5l4 4L19 6.5"/><circle cx="12" cy="12" r="9"/></>,
+    chart: <><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></>,
+    spark: <path d="M12 2l1.5 6.5L20 10l-6.5 1.5L12 18l-1.5-6.5L4 10l6.5-1.5L12 2zM19 17l.6 2.4L22 20l-2.4.6L19 23l-.6-2.4L16 20l2.4-.6L19 17z"/>,
+    book: <><path d="M4 4.5A3.5 3.5 0 017.5 1H20v18H7.5A3.5 3.5 0 004 22.5v-18z"/><path d="M4 19a3 3 0 013-3h13"/></>,
+    settings: <><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 00.34 1.88l.06.06-2.83 2.83-.06-.06a1.7 1.7 0 00-1.88-.34 1.7 1.7 0 00-1.03 1.56V21h-4v-.08A1.7 1.7 0 009 19.36a1.7 1.7 0 00-1.88.34l-.06.06-2.83-2.83.06-.06A1.7 1.7 0 004.63 15 1.7 1.7 0 003.08 14H3v-4h.08A1.7 1.7 0 004.64 9a1.7 1.7 0 00-.34-1.88l-.06-.06 2.83-2.83.06.06A1.7 1.7 0 009 4.63 1.7 1.7 0 0010 3.08V3h4v.08A1.7 1.7 0 0015 4.64a1.7 1.7 0 001.88-.34l.06-.06 2.83 2.83-.06.06A1.7 1.7 0 0019.37 9 1.7 1.7 0 0020.92 10H21v4h-.08A1.7 1.7 0 0019.4 15z"/></>,
+    help: <><circle cx="12" cy="12" r="9"/><path d="M9.7 9a2.4 2.4 0 114 1.8c-1.2.8-1.7 1.2-1.7 2.4M12 17h.01"/></>,
+    chevronLeft: <path d="M15 18l-6-6 6-6"/>, chevronRight: <path d="M9 18l6-6-6-6"/>,
+    filter: <path d="M4 6h16M7 12h10M10 18h4"/>,
+    export: <><path d="M12 3v12M8 7l4-4 4 4"/><path d="M5 13v7h14v-7"/></>,
+    scope: <><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="2"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/></>,
+    close: <path d="M6 6l12 12M18 6L6 18"/>,
+    focus: <><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3"/></>,
+    neutral: <><circle cx="12" cy="12" r="8"/><path d="M8 12h8"/></>,
+    distracted: <><path d="M5 5l14 14M19 5L5 19"/><circle cx="12" cy="12" r="9"/></>
+  }
+  return <svg className="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{paths[name]}</svg>
 }
 
 function addDaysToDayKey(dayKey: string, deltaDays: number): string {
@@ -2775,55 +2911,88 @@ function renderTimeTicks(windowStartTs: number, pxPerHourRaw: number) {
   return ticks
 }
 
-function renderReviewList(
-  cards: TimelineCardDTO[],
-  coverage: Record<number, number>,
+function ReviewQueue(props: {
+  cards: TimelineCardDTO[]
+  coverage: Record<number, number>
   onRate: (card: TimelineCardDTO, rating: 'focus' | 'neutral' | 'distracted') => void
-) {
-  const rows = cards
+}) {
+  const [index, setIndex] = useState(0)
+  const rows = props.cards
     .filter((c) => c.category !== 'System')
-    .map((card) => ({ card, coverage: coverage[card.id] ?? 0 }))
+    .map((card) => ({ card, coverage: props.coverage[card.id] ?? 0 }))
     .filter((x) => x.coverage < 0.8)
     .sort((a, b) => a.card.startTs - b.card.startTs)
 
+  const safeIndex = Math.max(0, Math.min(index, rows.length - 1))
+  const current = rows[safeIndex]
+
+  useEffect(() => {
+    if (index >= rows.length) setIndex(Math.max(0, rows.length - 1))
+  }, [index, rows.length])
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      const element = document.activeElement as HTMLElement | null
+      if (element && ['INPUT', 'TEXTAREA', 'SELECT'].includes(element.tagName)) return
+      if (!current) return
+      const ratings = { '1': 'focus', '2': 'neutral', '3': 'distracted' } as const
+      const rating = ratings[event.key as keyof typeof ratings]
+      if (rating) {
+        event.preventDefault()
+        props.onRate(current.card, rating)
+        return
+      }
+      if (event.key === 'ArrowLeft') {
+        event.preventDefault()
+        setIndex((value) => Math.max(0, value - 1))
+      }
+      if (event.key === 'ArrowRight') {
+        event.preventDefault()
+        setIndex((value) => Math.min(rows.length - 1, value + 1))
+      }
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [current, props, rows.length])
+
   if (rows.length === 0) {
     return (
-      <div className="reviewEmpty">
-        <div className="sideTitle">Nothing to review</div>
-        <div className="sideMeta">All non-system cards are at least 80% covered.</div>
+      <div className="reviewEmpty reviewComplete">
+        <div className="emptyStateIcon" aria-hidden="true">✓</div>
+        <div className="sideTitle">You’re all caught up</div>
+        <div className="sideMeta">Every activity is at least 80% reviewed.</div>
       </div>
     )
   }
 
   return (
-    <div className="reviewWrap">
+    <div className="reviewQueue">
       <div className="reviewHeader">
-        <div className="sideTitle">Review</div>
-        <div className="sideMeta">Rate cards until coverage reaches 80%.</div>
-      </div>
-
-      {rows.map(({ card, coverage }) => (
-        <div key={card.id} className="reviewRow">
-          <div className="reviewRowMain">
-            <div className="reviewRowTitle">{card.title}</div>
-            <div className="reviewRowMeta">
-              {formatClockAscii(card.startTs)} - {formatClockAscii(card.endTs)} · {card.category}
-              {` · ${(coverage * 100).toFixed(0)}% covered`}
-            </div>
-          </div>
-          <div className="reviewRowActions">
-            <button className="btn" onClick={() => onRate(card, 'focus')}>
-              Focus
-            </button>
-            <button className="btn" onClick={() => onRate(card, 'neutral')}>
-              Neutral
-            </button>
-            <button className="btn" onClick={() => onRate(card, 'distracted')}>
-              Distracted
-            </button>
-          </div>
+        <div>
+          <div className="eyebrow">Daily review</div>
+          <div className="sideTitle">How focused was this activity?</div>
         </div>
-      ))}
+        <div className="reviewProgressCopy">{safeIndex + 1} of {rows.length}</div>
+      </div>
+      <div className="reviewProgress" aria-label={`${safeIndex + 1} of ${rows.length} activities`}>
+        <span style={{ width: `${((safeIndex + 1) / rows.length) * 100}%` }} />
+      </div>
+      <article className="reviewFocusCard">
+        <div className="reviewTime">{formatClockAscii(current.card.startTs)} — {formatClockAscii(current.card.endTs)}</div>
+        <h2>{current.card.title}</h2>
+        <div className="reviewCategory"><span />{current.card.category}{current.card.subcategory ? ` · ${current.card.subcategory}` : ''}</div>
+        {current.card.summary ? <p>{current.card.summary}</p> : null}
+        <div className="reviewCoverageNote">Currently {Math.round(current.coverage * 100)}% covered · 80% completes this activity</div>
+      </article>
+      <div className="reviewRatingActions" aria-label="Focus rating">
+        <button onClick={() => props.onRate(current.card, 'focus')}><Icon name="focus" /><span><strong>Focus</strong><small>Intentional, productive</small></span><kbd>1</kbd></button>
+        <button onClick={() => props.onRate(current.card, 'neutral')}><Icon name="neutral" /><span><strong>Neutral</strong><small>Necessary or routine</small></span><kbd>2</kbd></button>
+        <button onClick={() => props.onRate(current.card, 'distracted')}><Icon name="distracted" /><span><strong>Distracted</strong><small>Unplanned, low value</small></span><kbd>3</kbd></button>
+      </div>
+      <div className="reviewNavActions">
+        <button className="btn btn-quiet" disabled={safeIndex === 0} onClick={() => setIndex((value) => Math.max(0, value - 1))}>← Previous</button>
+        <button className="btn btn-quiet" disabled={safeIndex === rows.length - 1} onClick={() => setIndex((value) => Math.min(rows.length - 1, value + 1))}>Skip for now →</button>
+      </div>
     </div>
   )
 }

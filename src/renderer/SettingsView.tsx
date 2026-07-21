@@ -16,6 +16,10 @@ const GEMINI_MODELS = [
 type DisplayInfo = { id: string; bounds: { width: number; height: number }; scaleFactor: number }
 
 export function SettingsView(props: {
+  initialSection?: string
+  themePreference: 'system' | 'light' | 'dark'
+  onChangeTheme: (theme: 'system' | 'light' | 'dark') => Promise<void>
+  onRunSetup: () => void
   statusLine: string
   recording: boolean
   systemPaused: boolean
@@ -121,19 +125,22 @@ export function SettingsView(props: {
 }) {
   const sections = useMemo(
     () => [
-      { id: 'capture', label: 'Capture' },
-      { id: 'timeline', label: 'Timeline' },
-      { id: 'analysis', label: 'Analysis' },
-      { id: 'ai', label: 'AI (Gemini)' },
-      { id: 'prompts', label: 'Prompts' },
+      { id: 'general', label: 'General' },
+      { id: 'capture', label: 'Capture & Privacy' },
+      { id: 'timeline', label: 'Timeline & Categories' },
+      { id: 'ai', label: 'AI & Analysis' },
       { id: 'storage', label: 'Storage' },
-      { id: 'sync', label: 'Sync' },
-      { id: 'app', label: 'App' }
+      { id: 'integrations', label: 'Integrations' },
+      { id: 'advanced', label: 'Advanced' }
     ],
     []
   )
 
-  const [active, setActive] = useState<string>('capture')
+  const [active, setActive] = useState<string>(props.initialSection ?? 'general')
+
+  useEffect(() => {
+    if (props.initialSection) setActive(props.initialSection)
+  }, [props.initialSection])
 
   const [catErr, setCatErr] = useState<string | null>(null)
   const [catBusy, setCatBusy] = useState<boolean>(false)
@@ -222,6 +229,45 @@ export function SettingsView(props: {
       </div>
 
       <div className="settingsBody">
+        {active === 'general' ? (
+          <div className="settingsSection">
+            <div className="sideTitle">General</div>
+            <div className="sideMeta">Appearance and everyday app behavior.</div>
+            <div className="block">
+              <div className="sideTitle">Appearance</div>
+              <div className="segmented settingsTheme" aria-label="Color theme">
+                {(['system', 'light', 'dark'] as const).map((theme) => (
+                  <button
+                    key={theme}
+                    className={props.themePreference === theme ? 'active' : ''}
+                    aria-pressed={props.themePreference === theme}
+                    onClick={() => void props.onChangeTheme(theme)}
+                  >
+                    {theme.charAt(0).toUpperCase() + theme.slice(1)}
+                  </button>
+                ))}
+              </div>
+              <div className="sideMeta">System follows your operating system’s light or dark appearance.</div>
+            </div>
+            <div className="block">
+              <div className="sideTitle">Startup</div>
+              <label className="checkRow">
+                <input
+                  type="checkbox"
+                  checked={props.autoStartEnabled}
+                  onChange={(e) => void props.onToggleAutoStartEnabled(e.target.checked)}
+                />
+                <span><strong>Launch at login</strong><small>Keep Chrona available from the tray after you sign in.</small></span>
+              </label>
+            </div>
+            <div className="block">
+              <div className="sideTitle">Setup</div>
+              <div className="sideMeta">Review privacy, capture permission, and your optional Gemini key.</div>
+              <div className="row"><button className="btn" onClick={props.onRunSetup}>Run setup again</button></div>
+            </div>
+          </div>
+        ) : null}
+
         {active === 'capture' ? (
           <div className="settingsSection">
             <div className="sideTitle">Capture</div>
@@ -784,8 +830,9 @@ export function SettingsView(props: {
           </div>
         ) : null}
 
-        {active === 'analysis' ? (
-          <div className="settingsSection">
+        {active === 'advanced' ? (
+          <details className="settingsSection advancedDetails">
+            <summary>Analysis tuning</summary>
             <div className="sideTitle">Analysis</div>
             <div className="sideMeta">
               Tuning affects how screenshots are grouped into batches and how much recent context is used to generate
@@ -928,7 +975,7 @@ export function SettingsView(props: {
                 <div className="mono">{props.analysisLine || '...'}</div>
               </div>
             </div>
-          </div>
+          </details>
         ) : null}
 
         {active === 'ai' ? (
@@ -1034,8 +1081,9 @@ export function SettingsView(props: {
           </div>
         ) : null}
 
-        {active === 'prompts' ? (
-          <div className="settingsSection">
+        {active === 'advanced' ? (
+          <details className="settingsSection advancedDetails">
+            <summary>Prompt controls</summary>
             <div className="sideTitle">Prompts</div>
             <div className="sideMeta">
               These instructions are inserted near the top of Chrona’s default prompts. Keep them short and compatible
@@ -1091,7 +1139,7 @@ export function SettingsView(props: {
                 Save prompt settings
               </button>
             </div>
-          </div>
+          </details>
         ) : null}
 
         {active === 'storage' ? (
@@ -1174,9 +1222,9 @@ export function SettingsView(props: {
           </div>
         ) : null}
 
-        {active === 'sync' ? <SyncSettings /> : null}
+        {active === 'integrations' ? <SyncSettings /> : null}
 
-        {active === 'app' ? (
+        {false ? (
           <div className="settingsSection">
             <div className="sideTitle">App</div>
             <div className="sideMeta">System integration and behavior.</div>
