@@ -1,7 +1,7 @@
 import type { BrowserWindow } from 'electron'
 import { app, globalShortcut, shell } from 'electron'
 import { createTray } from './tray'
-import { createMainWindow } from './window'
+import { createMainWindow, loadMainWindow } from './window'
 import { registerIpc } from './ipc'
 import { SettingsStore } from './settings'
 import { createLogger } from './logger'
@@ -96,7 +96,10 @@ async function main() {
     })
   }
 
-  const win = await createMainWindow()
+  // Create the window now so services can publish events to it, but do not load the
+  // renderer until every IPC handler is registered. Loading first lets renderer
+  // effects race startup and invoke channels that do not exist yet.
+  const win = createMainWindow()
   mainWindow = win
 
   let trayCtl: ReturnType<typeof createTray> | null = null
@@ -231,6 +234,8 @@ async function main() {
   const categories = new CategoriesService({ settings, storage })
 
   registerIpc({ settings, capture, storage, analysis, retention, ask, dashboard, journal, categories, sync, blur, log })
+
+  await loadMainWindow(win)
 
   win.webContents.on('render-process-gone', (_event, details) => {
     log.error('renderer.gone', { reason: details.reason, exitCode: details.exitCode })

@@ -32,7 +32,7 @@ function isAllowedAppNavigationUrl(urlString: string): boolean {
   return urlString.startsWith('chrona-media:')
 }
 
-export async function createMainWindow(): Promise<BrowserWindow> {
+export function createMainWindow(): BrowserWindow {
   const win = new BrowserWindow({
     width: 1280,
     height: 820,
@@ -60,16 +60,14 @@ export async function createMainWindow(): Promise<BrowserWindow> {
     if (isSafeExternalUrl(url)) void shell.openExternal(url)
   })
 
-  await loadRenderer(win)
+  return win
+}
 
+export async function loadMainWindow(win: BrowserWindow): Promise<void> {
   win.once('ready-to-show', () => {
     win.show()
   })
 
-  return win
-}
-
-async function loadRenderer(win: BrowserWindow) {
   const devUrl = process.env.CHRONA_DEV_SERVER_URL
   if (devUrl) {
     await win.loadURL(devUrl)
