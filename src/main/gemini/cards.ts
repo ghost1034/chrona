@@ -14,6 +14,8 @@ export type CardGenerationResult = {
   cards: CardGenerationCard[]
 }
 
+export type AllowedSubcategoriesByCategory = Readonly<Record<string, readonly string[]>>
+
 export const DEFAULT_CATEGORIES = ['Work', 'Personal', 'Distraction', 'Idle'] as const
 
 export function parseAndValidateCardsJson(opts: {
@@ -21,6 +23,7 @@ export function parseAndValidateCardsJson(opts: {
   windowStartTs: number
   windowEndTs: number
   allowedCategories?: readonly string[]
+  allowedSubcategoriesByCategory?: AllowedSubcategoriesByCategory
 }): CardGenerationResult {
   const parsed = safeJsonParse(opts.jsonText)
   if (!parsed || typeof parsed !== 'object') throw new Error('Invalid JSON (expected object)')
@@ -51,7 +54,8 @@ export function parseAndValidateCardsJson(opts: {
     // (Cards may extend outside the window for continuity, but must overlap it.)
     if (e <= opts.windowStartTs || s >= opts.windowEndTs) continue
 
-    const subcategory = (c as any).subcategory
+    const subcategory = normalizeNullableString((c as any).subcategory)
+    const allowedSubcategories = new Set(opts.allowedSubcategoriesByCategory?.[category] ?? [])
     const summary = (c as any).summary
     const detailedSummary = (c as any).detailedSummary
 
@@ -70,7 +74,7 @@ export function parseAndValidateCardsJson(opts: {
       startTs: s,
       endTs: e,
       category,
-      subcategory: normalizeNullableString(subcategory),
+      subcategory: subcategory && allowedSubcategories.has(subcategory) ? subcategory : null,
       title,
       summary: normalizeNullableString(summary),
       detailedSummary: normalizeNullableString(detailedSummary),

@@ -52,6 +52,44 @@ describe('parseAndValidateCardsJson', () => {
     })
     expect(res.cards).toHaveLength(0)
   })
+
+  test('only keeps configured subcategories for the card category', () => {
+    const res = parseAndValidateCardsJson({
+      jsonText: JSON.stringify({
+        cards: [
+          {
+            startTs: 1000,
+            endTs: 1100,
+            category: 'Work',
+            subcategory: 'Coding',
+            title: 'Valid'
+          },
+          {
+            startTs: 1100,
+            endTs: 1200,
+            category: 'Work',
+            subcategory: 'Invented',
+            title: 'Unknown'
+          },
+          {
+            startTs: 1200,
+            endTs: 1300,
+            category: 'Work',
+            subcategory: 'Exercise',
+            title: 'Wrong category'
+          }
+        ]
+      }),
+      windowStartTs: 1000,
+      windowEndTs: 2000,
+      allowedSubcategoriesByCategory: {
+        Work: ['Coding'],
+        Personal: ['Exercise']
+      }
+    })
+
+    expect(res.cards.map((card) => card.subcategory)).toEqual(['Coding', null, null])
+  })
 })
 
 describe('stripCodeFences', () => {

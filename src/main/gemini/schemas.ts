@@ -39,8 +39,20 @@ export function buildTranscriptionResponseSchema(): JsonSchema {
   }
 }
 
-export function buildCardGenerationResponseSchema(allowedCategories: string[]): JsonSchema {
+export function buildCardGenerationResponseSchema(
+  allowedCategories: string[],
+  allowedSubcategoriesByCategory: Readonly<Record<string, readonly string[]>> = {}
+): JsonSchema {
   const cats = Array.from(new Set(allowedCategories.map((c) => String(c ?? '').trim()).filter(Boolean)))
+  const subcategories = Array.from(
+    new Set(
+      cats.flatMap((category) =>
+        (allowedSubcategoriesByCategory[category] ?? [])
+          .map((subcategory) => String(subcategory ?? '').trim())
+          .filter(Boolean)
+      )
+    )
+  )
   return {
     type: 'object',
     propertyOrdering: ['cards'],
@@ -69,7 +81,18 @@ export function buildCardGenerationResponseSchema(allowedCategories: string[]): 
               enum: cats,
               description: 'Must be one of the allowed categories.'
             },
-            subcategory: { type: ['string', 'null'] },
+            subcategory:
+              subcategories.length > 0
+                ? {
+                    type: ['string', 'null'],
+                    enum: [...subcategories, null],
+                    description:
+                      'Must be null or one of the configured subcategories for the selected category.'
+                  }
+                : {
+                    type: 'null',
+                    description: 'No subcategories are configured, so this must be null.'
+                  },
             title: { type: 'string' },
             summary: { type: ['string', 'null'] },
             detailedSummary: { type: ['string', 'null'] },

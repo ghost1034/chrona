@@ -235,6 +235,28 @@ export class GeminiService {
           }))
           .filter((s) => s.categoryId && s.name)
       : []
+    const categoryNameById = new Map<string, string>(
+      Array.isArray((settings as any)?.categories)
+        ? ((settings as any).categories as any[])
+            .map(
+              (category) =>
+                [
+                  String(category?.id ?? '').trim(),
+                  String(category?.name ?? '').trim()
+                ] as const
+            )
+            .filter(([id, name]) => id && name && allowedCategoriesFinal.includes(name))
+        : []
+    )
+    const allowedSubcategoriesByCategory: Record<string, string[]> = Object.fromEntries(
+      allowedCategoriesFinal.map((category) => [category, []])
+    )
+    for (const subcategory of subcategories) {
+      const category = categoryNameById.get(subcategory.categoryId)
+      if (!category) continue
+      const allowed = allowedSubcategoriesByCategory[category]
+      if (!allowed.includes(subcategory.name)) allowed.push(subcategory.name)
+    }
     const apiKey = await getGeminiApiKey()
     if (!apiKey && !process.env.CHRONA_GEMINI_MOCK) {
       throw new Error('Missing Gemini API key (set CHRONA_GEMINI_API_KEY or store via keychain)')
@@ -244,13 +266,14 @@ export class GeminiService {
       const endTs = Math.max(opts.windowStartTs + 60, opts.windowEndTs - 60)
       const startTs = Math.max(opts.windowStartTs, endTs - 15 * 60)
       const mockCategory = allowedCategoriesFinal[0] ?? 'Work'
+      const mockSubcategory = allowedSubcategoriesByCategory[mockCategory]?.[0] ?? null
       const mockJson = JSON.stringify({
         cards: [
           {
             startTs,
             endTs,
             category: mockCategory,
-            subcategory: 'Mock',
+            subcategory: mockSubcategory,
             title: 'Mock activity',
             summary: 'Mock card generation result.'
           }
@@ -261,7 +284,8 @@ export class GeminiService {
         jsonText: mockJson,
         windowStartTs: opts.windowStartTs,
         windowEndTs: opts.windowEndTs,
-        allowedCategories: allowedCategoriesFinal
+        allowedCategories: allowedCategoriesFinal,
+        allowedSubcategoriesByCategory
       })
 
       return {
@@ -295,12 +319,15 @@ export class GeminiService {
 
     const requestBody = {
       contents: [{ role: 'user', parts: [{ text: prompt }] }],
-        generationConfig: {
-          temperature: 0.2,
-          responseMimeType: 'application/json',
-          responseJsonSchema: buildCardGenerationResponseSchema(allowedCategoriesFinal)
-        }
+      generationConfig: {
+        temperature: 0.2,
+        responseMimeType: 'application/json',
+        responseJsonSchema: buildCardGenerationResponseSchema(
+          allowedCategoriesFinal,
+          allowedSubcategoriesByCategory
+        )
       }
+    }
 
     const callGroupId = `batch:${opts.batchId}:generate_cards:${Date.now()}`
 
@@ -320,7 +347,8 @@ export class GeminiService {
       jsonText: extracted,
       windowStartTs: opts.windowStartTs,
       windowEndTs: opts.windowEndTs,
-      allowedCategories: allowedCategoriesFinal
+      allowedCategories: allowedCategoriesFinal,
+      allowedSubcategoriesByCategory
     })
     if (parsed.cards.length === 0) {
       throw new Error('Gemini returned no valid cards')
@@ -628,6 +656,7 @@ function buildCardGenerationPrompt(opts: {
     '- Use unix seconds for startTs/endTs.',
     '- Each card must satisfy endTs > startTs.',
     '- category must be one of the allowed categories exactly.',
+    '- subcategory must be null or exactly match a configured subcategory for the selected category. Never invent a subcategory.',
     '- Do not output any text outside the JSON.',
     '',
     'Rules for Overlapping:',
