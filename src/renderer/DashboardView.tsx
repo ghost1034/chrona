@@ -8,6 +8,7 @@ type Preset = 'day' | 'today' | 'yesterday' | 'last7' | 'last30' | 'custom'
 
 export function DashboardView(props: {
   selectedDayKey: string
+  nowTs: number
   onJumpToDay: (dayKey: string) => void
   categories: CategoryDefinition[]
 }) {
@@ -21,7 +22,7 @@ export function DashboardView(props: {
   const [error, setError] = useState<string | null>(null)
 
   const scope = useMemo(() => {
-    const nowDayKey = dayKeyFromUnixSeconds(Math.floor(Date.now() / 1000))
+    const nowDayKey = dayKeyFromUnixSeconds(props.nowTs)
 
     if (preset === 'today') return dayWindowForDayKey(nowDayKey)
     if (preset === 'yesterday') return dayWindowForDayKey(addDaysToDayKey(nowDayKey, -1))
@@ -43,7 +44,7 @@ export function DashboardView(props: {
       return { startTs: Math.min(a, b), endTs: Math.max(a, b) }
     }
     return dayWindowForDayKey(props.selectedDayKey)
-  }, [preset, props.selectedDayKey, customStartDayKey, customEndDayKey])
+  }, [preset, props.selectedDayKey, props.nowTs, customStartDayKey, customEndDayKey])
 
   const scopeDayKeys = useMemo(
     () => enumerateDayKeysForScope(scope.startTs, scope.endTs),

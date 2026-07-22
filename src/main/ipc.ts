@@ -33,6 +33,8 @@ import { buildTimelineXlsxBuffer } from './export/timelineXlsx'
 import type { CategoriesService } from './categories/categories'
 import type { SyncService } from './sync/sync'
 import type { BlurService } from './blur/blur'
+import { applyDemoCardVisibility, effectiveNowTs } from '../shared/demo'
+import { computeDashboardStats } from '../shared/stats'
 
 type Handler<K extends keyof IpcContract> = (
   req: IpcContract[K]['req']
@@ -54,7 +56,13 @@ export function registerIpc(opts: {
 }) {
   const gemini = new GeminiService({ storage: opts.storage, log: opts.log, settings: opts.settings })
 
-  handle('app:ping', async () => ({ ok: true, nowTs: Math.floor(Date.now() / 1000) }))
+  handle('app:ping', async () => {
+    const settings = await opts.settings.getAll()
+    return {
+      ok: true,
+      nowTs: effectiveNowTs(Math.floor(Date.now() / 1000), settings.demoTimeOffsetSeconds)
+    }
+  })
 
   handle('app:getAutoStart', async () => {
     const s = await opts.settings.getAll()
@@ -209,7 +217,11 @@ export function registerIpc(opts: {
   })
 
   handle('timeline:getDay', async (req) => {
-    const cards = await opts.storage.fetchCardsForDay(req.dayKey)
+    const settings = await opts.settings.getAll()
+    const cards = applyDemoCardVisibility(
+      await opts.storage.fetchCardsForDay(req.dayKey),
+      settings.demoCardsHidden
+    )
     return {
       dayKey: req.dayKey,
       cards: cards.map(mapCardRow)
@@ -219,6 +231,9 @@ export function registerIpc(opts: {
   handle('timeline:getCardObservations', async (req) => {
     const cardId = Math.floor(Number(req.cardId))
     if (!Number.isFinite(cardId) || cardId <= 0) throw new Error('Invalid cardId')
+    if ((await opts.settings.getAll()).demoCardsHidden) {
+      return { cardId, observations: [] }
+    }
 
     const card = await opts.storage.fetchTimelineCardById(cardId)
     if (!card) return { cardId, observations: [] }
@@ -241,6 +256,14 @@ export function registerIpc(opts: {
   })
 
   handle('timeline:search', async (req) => {
+    if ((await opts.settings.getAll()).demoCardsHidden) {
+      return {
+        hits: [],
+        limit: Math.max(1, Math.floor(Number(req.limit)) || 50),
+        offset: Math.max(0, Math.floor(Number(req.offset)) || 0),
+        hasMore: false
+      }
+    }
     const res = await opts.storage.searchTimelineCards(req)
     return {
       hits: res.hits.map((h) => ({
@@ -267,14 +290,19 @@ export function registerIpc(opts: {
   })
 
   handle('timeline:copyDayToClipboard', async (req) => {
-    const cards = (await opts.storage.fetchCardsForDay(req.dayKey)).map(mapCardRow)
+    const settings = await opts.settings.getAll()
+    const cards = applyDemoCardVisibility(
+      (await opts.storage.fetchCardsForDay(req.dayKey)).map(mapCardRow),
+      settings.demoCardsHidden
+    )
     const text = formatDayForClipboard({ dayKey: req.dayKey, cards })
     clipboard.writeText(text)
     return { ok: true }
   })
 
   handle('timeline:saveMarkdownRange', async (req) => {
-    const days = await loadDayRange(opts.storage, req.startDayKey, req.endDayKey)
+    const hidden = (await opts.settings.getAll()).demoCardsHidden
+    const days = await loadDayRange(opts.storage, req.startDayKey, req.endDayKey, hidden)
     const markdown = formatRangeMarkdown({
       startDayKey: req.startDayKey,
       endDayKey: req.endDayKey,
@@ -293,7 +321,8 @@ export function registerIpc(opts: {
   })
 
   handle('timeline:saveCsvRange', async (req) => {
-    const days = await loadDayRange(opts.storage, req.startDayKey, req.endDayKey)
+    const hidden = (await opts.settings.getAll()).demoCardsHidden
+    const days = await loadDayRange(opts.storage, req.startDayKey, req.endDayKey, hidden)
     const includeReviewCoverage = !!req.options?.includeReviewCoverage
 
     const rows = [] as ReturnType<typeof buildTimelineExportRowsForDay>
@@ -331,7 +360,13 @@ export function registerIpc(opts: {
   })
 
   handle('timeline:saveXlsxRange', async (req) => {
-    const days = await loadDayRange(opts.storage, req.startDayKey, req.endDayKey)
+    const settings = await opts.settings.getAll()
+    const days = await loadDayRange(
+      opts.storage,
+      req.startDayKey,
+      req.endDayKey,
+      settings.demoCardsHidden
+    )
     const includeReviewCoverage = !!req.options?.includeReviewCoverage
 
     const rows = [] as ReturnType<typeof buildTimelineExportRowsForDay>
@@ -362,7 +397,9 @@ export function registerIpc(opts: {
     } catch {
       // ignore
     }
-    const generatedAtLocal = formatLocalDateTimeAscii(Math.floor(Date.now() / 1000))
+    const generatedAtLocal = formatLocalDateTimeAscii(
+      effectiveNowTs(Math.floor(Date.now() / 1000), settings.demoTimeOffsetSeconds)
+    )
 
     const buf = await buildTimelineXlsxBuffer({
       rows,
@@ -435,12 +472,18 @@ export function registerIpc(opts: {
   })
 
   handle('review:getDay', async (req) => {
-    const cards = (await opts.storage.fetchCardsForDay(req.dayKey)).map(mapCardRow)
+    const hidden = (await opts.settings.getAll()).demoCardsHidden
+    const cards = applyDemoCardVisibility(
+      (await opts.storage.fetchCardsForDay(req.dayKey)).map(mapCardRow),
+      hidden
+    )
     const win = dayWindowForDayKey(req.dayKey)
-    const segments = await opts.storage.fetchReviewSegmentsInRange({
-      startTs: win.startTs,
-      endTs: win.endTs
-    })
+    const segments = hidden
+      ? []
+      : await opts.storage.fetchReviewSegmentsInRange({
+          startTs: win.startTs,
+          endTs: win.endTs
+        })
     const coverage = coverageByCardId({ cards, segments, ignoreSystem: true })
 
     return {
@@ -488,6 +531,13 @@ export function registerIpc(opts: {
   })
 
   handle('ask:run', async (req) => {
+    if ((await opts.settings.getAll()).demoCardsHidden) {
+      return {
+        answerMarkdown: 'No timeline cards were found in the selected scope.',
+        sources: [],
+        followUps: []
+      }
+    }
     return opts.ask.run(req)
   })
 
@@ -496,6 +546,16 @@ export function registerIpc(opts: {
     const endTs = Math.floor(Number(req.scope?.endTs))
     if (!Number.isFinite(startTs) || !Number.isFinite(endTs) || endTs <= startTs) {
       throw new Error('Invalid dashboard scope')
+    }
+
+    if ((await opts.settings.getAll()).demoCardsHidden) {
+      return computeDashboardStats({
+        scopeStartTs: startTs,
+        scopeEndTs: endTs,
+        cards: [],
+        reviewSegments: [],
+        includeSystem: !!req.options?.includeSystem
+      })
     }
 
     return opts.dashboard.getStats({
@@ -547,7 +607,12 @@ function mapCardRow(r: any) {
   }
 }
 
-async function loadDayRange(storage: StorageService, startDayKey: string, endDayKey: string) {
+async function loadDayRange(
+  storage: StorageService,
+  startDayKey: string,
+  endDayKey: string,
+  cardsHidden = false
+) {
   const start = parseDayKey(startDayKey)
   const end = parseDayKey(endDayKey)
   if (!start || !end) throw new Error('Invalid dayKey')
@@ -557,7 +622,10 @@ async function loadDayRange(storage: StorageService, startDayKey: string, endDay
   const d = new Date(start)
   while (d.getTime() <= end.getTime()) {
     const dayKey = dayKeyFromUnixSeconds(Math.floor(d.getTime() / 1000) + 4 * 60 * 60)
-    const cards = (await storage.fetchCardsForDay(dayKey)).map(mapCardRow)
+    const cards = applyDemoCardVisibility(
+      (await storage.fetchCardsForDay(dayKey)).map(mapCardRow),
+      cardsHidden
+    )
     days.push({ dayKey, cards })
     d.setDate(d.getDate() + 1)
   }

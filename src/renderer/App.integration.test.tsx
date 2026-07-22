@@ -89,4 +89,46 @@ describe('redesigned application workflows', () => {
     await user.click(screen.getByRole('button', { name: 'Purge media' }))
     expect(purgeStorage).toHaveBeenCalledTimes(1)
   })
+
+  it('opens concealed demo controls and makes hidden cards and statistics appear empty', async () => {
+    const user = userEvent.setup()
+    const api = createChronaFixture('populated')
+    let hidden = false
+    const updateSettings = vi.fn(async (patch: any) => {
+      if (Object.prototype.hasOwnProperty.call(patch, 'demoCardsHidden')) hidden = !!patch.demoCardsHidden
+      return { demoCardsHidden: hidden, demoTimeOffsetSeconds: null } as any
+    })
+    api.updateSettings = updateSettings
+    api.getDashboardStats = vi.fn(async (scope: any) => hidden
+      ? {
+          scope,
+          windowSeconds: scope.endTs - scope.startTs,
+          trackedSeconds: 0,
+          untrackedSeconds: scope.endTs - scope.startTs,
+          byCategorySeconds: [],
+          byTitleSeconds: [],
+          perDay: [],
+          review: { trackedNonSystemSeconds: 0, coveredSeconds: 0, coverageFraction: 0, focusSeconds: 0, neutralSeconds: 0, distractedSeconds: 0, unreviewedCardCount: 0 },
+          blocks: { longestWorkBlockSeconds: 0 }
+        }
+      : createChronaFixture('populated').getDashboardStats(scope))
+    window.chrona = api
+    render(<App />)
+
+    expect(await screen.findByText('Plan project milestones')).toBeInTheDocument()
+    await user.keyboard('{Meta>}{Shift>}d{/Shift}{/Meta}')
+    const dialog = screen.getByRole('dialog', { name: 'Demo controls' })
+    await user.click(within(dialog).getByLabelText('Hide all timeline cards'))
+    await user.click(within(dialog).getByRole('button', { name: 'Apply' }))
+
+    expect(updateSettings).toHaveBeenCalledWith(expect.objectContaining({ demoCardsHidden: true }))
+    await waitFor(() => expect(screen.queryByText('Plan project milestones')).not.toBeInTheDocument())
+    const trackedMetric = screen.getByText('Tracked time').closest('article')
+    expect(trackedMetric).not.toBeNull()
+    expect(within(trackedMetric!).getByText('0m')).toBeInTheDocument()
+
+    await user.keyboard('{Meta>}{Shift>}h{/Shift}{/Meta}')
+    expect(await screen.findByText('Plan project milestones')).toBeInTheDocument()
+    expect(updateSettings).toHaveBeenLastCalledWith(expect.objectContaining({ demoCardsHidden: false }))
+  })
 })

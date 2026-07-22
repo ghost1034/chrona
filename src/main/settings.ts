@@ -74,6 +74,9 @@ const DEFAULT_SETTINGS: Settings = {
   onboardingVersion: 1,
   onboardingCompleted: false,
 
+  demoTimeOffsetSeconds: null,
+  demoCardsHidden: false,
+
   syncEnabled: false,
   // Empty means CPAAutomation's production API (DEFAULT_SYNC_ENDPOINT);
   // hand-edit settings.json to point at a dev server instead.

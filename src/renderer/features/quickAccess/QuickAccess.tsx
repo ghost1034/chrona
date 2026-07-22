@@ -16,6 +16,7 @@ type Action = {
 export function QuickAccess(props: {
   platform: 'darwin' | 'win32' | 'linux'
   dayKey: string
+  nowTs: number
   recording: boolean
   onNavigate: (target: 'today' | 'timeline' | 'reflect' | 'insights' | 'ask' | 'settings') => void
   onToggleRecording: () => Promise<void>
@@ -78,7 +79,7 @@ export function QuickAccess(props: {
       const today = dayWindowForDayKey(props.dayKey)
       void window.chrona.searchTimeline({
         query: value,
-        scope: { startTs: 0, endTs: Math.max(today.endTs, Math.floor(Date.now() / 1000)) },
+        scope: { startTs: 0, endTs: Math.max(today.endTs, props.nowTs) },
         filters: { includeSystem: true },
         limit: 8,
         offset: 0
@@ -94,7 +95,7 @@ export function QuickAccess(props: {
       })
     }, 150)
     return () => window.clearTimeout(timer)
-  }, [open, props.dayKey, query])
+  }, [open, props.dayKey, props.nowTs, query])
 
   const items = [
     ...filteredActions.map((action) => ({ id: `action:${action.id}`, action })),

@@ -21,7 +21,7 @@ describe('QuickAccess', () => {
   it('opens from the keyboard, searches after 150ms, executes a result, and restores focus', async () => {
     const user = userEvent.setup()
     const onJumpToCard = vi.fn()
-    render(<><button>Origin</button><QuickAccess platform="darwin" dayKey="2026-03-23" recording={false} onNavigate={vi.fn()} onToggleRecording={vi.fn(async () => undefined)} onJumpToCard={onJumpToCard} /></>)
+    render(<><button>Origin</button><QuickAccess platform="darwin" dayKey="2026-03-23" nowTs={1_774_342_200} recording={false} onNavigate={vi.fn()} onToggleRecording={vi.fn(async () => undefined)} onJumpToCard={onJumpToCard} /></>)
     const origin = screen.getByRole('button', { name: 'Origin' })
     origin.focus()
 

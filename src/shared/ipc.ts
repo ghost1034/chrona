@@ -47,6 +47,11 @@ export type Settings = {
   onboardingVersion: number
   onboardingCompleted: boolean
 
+  // Concealed recording-demo controls. A time offset keeps the staged clock
+  // moving naturally; hiding cards is presentation-only and never deletes data.
+  demoTimeOffsetSeconds: number | null
+  demoCardsHidden: boolean
+
   // CPAAutomation sync
   syncEnabled: boolean
   syncEndpoint: string

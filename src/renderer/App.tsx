@@ -23,6 +23,8 @@ import { Icon } from './components/Icon'
 import { QuickAccess } from './features/quickAccess/QuickAccess'
 import { ApplicationSidebar } from './components/ApplicationSidebar'
 import { ReviewQueue } from './features/reflect/ReviewQueue'
+import { DemoControls } from './DemoControls'
+import { effectiveNowTs } from '../shared/demo'
 import * as Tabs from '@radix-ui/react-tabs'
 import {
   routeFromNavigationEvent,
@@ -95,6 +97,12 @@ export function App() {
 
   const [dayKey, setDayKey] = useState<string>(() => dayKeyFromUnixSeconds(Math.floor(Date.now() / 1000)))
   const [cards, setCards] = useState<TimelineCardDTO[]>([])
+  const [demoTimeOffsetSeconds, setDemoTimeOffsetSeconds] = useState<number | null>(null)
+  const [demoCardsHidden, setDemoCardsHidden] = useState<boolean>(false)
+  const [demoControlsOpen, setDemoControlsOpen] = useState<boolean>(false)
+  const [demoDataRevision, setDemoDataRevision] = useState<number>(0)
+  const [realNowTs, setRealNowTs] = useState<number>(() => Math.floor(Date.now() / 1000))
+  const appNowTs = effectiveNowTs(realNowTs, demoTimeOffsetSeconds)
 
   const [categoryDefs, setCategoryDefs] = useState<CategoryDefinition[]>([])
   const [subcategoryDefs, setSubcategoryDefs] = useState<SubcategoryDefinition[]>([])
@@ -281,6 +289,15 @@ export function App() {
       await refreshSetupStatus()
 
       const settings = await window.chrona.getSettings()
+      const demoOffsetRaw = (settings as any).demoTimeOffsetSeconds
+      const demoOffset = demoOffsetRaw === null || demoOffsetRaw === undefined
+        ? null
+        : Number.isFinite(Number(demoOffsetRaw))
+          ? Math.floor(Number(demoOffsetRaw))
+          : null
+      setDemoTimeOffsetSeconds(demoOffset)
+      setDemoCardsHidden(!!(settings as any).demoCardsHidden)
+      setDayKey(dayKeyFromUnixSeconds(effectiveNowTs(Math.floor(Date.now() / 1000), demoOffset)))
       setThemePreference(settings.themePreference ?? 'system')
       setCategoryDefs(Array.isArray((settings as any).categories) ? ((settings as any).categories as any) : [])
       setSubcategoryDefs(
@@ -375,6 +392,11 @@ export function App() {
   }, [])
 
   useEffect(() => {
+    const timer = window.setInterval(() => setRealNowTs(Math.floor(Date.now() / 1000)), 15_000)
+    return () => window.clearInterval(timer)
+  }, [])
+
+  useEffect(() => {
     const media = window.matchMedia('(prefers-color-scheme: dark)')
     const apply = () => {
       const resolved = themePreference === 'system' ? (media.matches ? 'dark' : 'light') : themePreference
@@ -404,6 +426,10 @@ export function App() {
   useEffect(() => {
     const onEscape = (event: KeyboardEvent) => {
       if (event.key !== 'Escape') return
+      if (demoControlsOpen) {
+        setDemoControlsOpen(false)
+        return
+      }
       if (exportDialogOpen) {
         setExportDialogOpen(false)
         return
@@ -415,7 +441,7 @@ export function App() {
     }
     window.addEventListener('keydown', onEscape)
     return () => window.removeEventListener('keydown', onEscape)
-  }, [exportDialogOpen, secondaryPanelOpen, selectedCardId])
+  }, [demoControlsOpen, exportDialogOpen, secondaryPanelOpen, selectedCardId])
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
@@ -430,6 +456,24 @@ export function App() {
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
   }, [])
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (!(event.metaKey || event.ctrlKey) || !event.shiftKey) return
+      const key = event.key.toLowerCase()
+      if (key === 'd') {
+        event.preventDefault()
+        setDemoControlsOpen((open) => !open)
+        return
+      }
+      if (key === 'h') {
+        event.preventDefault()
+        void setDemoCardVisibility(!demoCardsHidden)
+      }
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [demoCardsHidden, dayKey])
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
@@ -610,7 +654,7 @@ export function App() {
     setTimelineSearchLoading(true)
     setTimelineSearchError(null)
 
-    const scope = getTimelineSearchScope(timelineSearchScopePreset, dayKey)
+    const scope = getTimelineSearchScope(timelineSearchScopePreset, dayKey, appNowTs)
     const limit = 200
     const req: TimelineSearchRequestDTO = {
       query: q,
@@ -656,7 +700,8 @@ export function App() {
     timelineSearchScopePreset,
     timelineSearchQuery,
     timelineFilters,
-    dayKey
+    dayKey,
+    demoTimeOffsetSeconds
   ])
 
   useEffect(() => {
@@ -686,6 +731,43 @@ export function App() {
   async function refreshReview(k: string) {
     const res = await window.chrona.getReviewDay(k)
     setReviewCoverage(res.coverageByCardId)
+  }
+
+  async function setDemoCardVisibility(hidden: boolean) {
+    await window.chrona.updateSettings({ demoCardsHidden: hidden })
+    setDemoCardsHidden(hidden)
+    setSelectedCardId(null)
+    setReviewCoverage({})
+    setAskMessages([])
+    setAskFollowUps([])
+    setAskError(null)
+    setDemoDataRevision((value) => value + 1)
+    if (hidden) setCards([])
+    else await refreshDay(dayKeyRef.current, false)
+  }
+
+  async function applyDemoControls(next: {
+    timeOffsetSeconds: number | null
+    cardsHidden: boolean
+  }) {
+    await window.chrona.updateSettings({
+      demoTimeOffsetSeconds: next.timeOffsetSeconds,
+      demoCardsHidden: next.cardsHidden
+    })
+    setDemoTimeOffsetSeconds(next.timeOffsetSeconds)
+    setDemoCardsHidden(next.cardsHidden)
+    setSelectedCardId(null)
+    setReviewCoverage({})
+    setAskMessages([])
+    setAskFollowUps([])
+    setAskError(null)
+    setDemoDataRevision((value) => value + 1)
+
+    const nextNowTs = effectiveNowTs(Math.floor(Date.now() / 1000), next.timeOffsetSeconds)
+    const nextDayKey = dayKeyFromUnixSeconds(nextNowTs)
+    setDayKey(nextDayKey)
+    if (next.cardsHidden) setCards([])
+    else await refreshDay(nextDayKey, false)
   }
 
   function jumpToTimelineCard(c: TimelineCardDTO) {
@@ -721,7 +803,7 @@ export function App() {
     setTimelineSearchLoading(true)
     setTimelineSearchError(null)
     try {
-      const scope = getTimelineSearchScope(timelineSearchScopePreset, dayKeyRef.current)
+      const scope = getTimelineSearchScope(timelineSearchScopePreset, dayKeyRef.current, appNowTs)
       const limit = 200
       const req: TimelineSearchRequestDTO = {
         query: q,
@@ -1145,7 +1227,7 @@ export function App() {
   }
 
   function onNow() {
-    const ts = Math.floor(Date.now() / 1000)
+    const ts = appNowTs
     const k = dayKeyFromUnixSeconds(ts)
     pendingScrollToTsRef.current = ts
     setTimelineSearchScopePreset('day')
@@ -1319,8 +1401,8 @@ export function App() {
   }, [view, zoomIn, zoomOut, zoomReset])
 
   const windowInfo = dayWindowForDayKey(dayKey)
-  const isToday = dayKey === dayKeyFromUnixSeconds(Math.floor(Date.now() / 1000))
-  const nowTs = Math.floor(Date.now() / 1000)
+  const isToday = dayKey === dayKeyFromUnixSeconds(appNowTs)
+  const nowTs = appNowTs
   const nowYpx =
     isToday && nowTs >= windowInfo.startTs && nowTs <= windowInfo.endTs
       ? timeToYpx(nowTs, windowInfo.startTs, windowInfo.endTs, timelineMetrics)
@@ -1336,7 +1418,7 @@ export function App() {
         onToggleRecording={onToggleRecording}
         onNavigate={(target) => {
           if (target === 'today') {
-            setDayKey(dayKeyFromUnixSeconds(Math.floor(Date.now() / 1000)))
+            setDayKey(dayKeyFromUnixSeconds(appNowTs))
             setView('today')
           } else if (target === 'reflect') setView('review')
           else if (target === 'insights') setView('dashboard')
@@ -1385,6 +1467,14 @@ export function App() {
             {view === 'settings' ? <button className="btn" onClick={() => setView('onboarding')}>Run setup again</button> : null}
           </div>
         </header>
+
+      <DemoControls
+        open={demoControlsOpen}
+        timeOffsetSeconds={demoTimeOffsetSeconds}
+        cardsHidden={demoCardsHidden}
+        onClose={() => setDemoControlsOpen(false)}
+        onApply={applyDemoControls}
+      />
 
       {exportDialogOpen && view !== 'journal' ? (
         <div
@@ -1497,7 +1587,8 @@ export function App() {
           <section className="timeline todaySurface">
             <div className="timelineScroll">
               <TodayView
-                dayKey={dayKeyFromUnixSeconds(Math.floor(Date.now() / 1000))}
+                key={`today:${demoDataRevision}`}
+                dayKey={dayKeyFromUnixSeconds(appNowTs)}
                 cards={cards}
                 categories={categoryDefs}
                 recording={recording}
@@ -1506,7 +1597,7 @@ export function App() {
                 hasGeminiKey={hasGeminiKey}
                 onToggleRecording={onToggleRecording}
                 onOpenTimeline={(cardId) => {
-                  const todayKey = dayKeyFromUnixSeconds(Math.floor(Date.now() / 1000))
+                  const todayKey = dayKeyFromUnixSeconds(appNowTs)
                   setDayKey(todayKey)
                   setSelectedCardId(cardId ?? null)
                   setView('timeline')
@@ -2051,7 +2142,9 @@ export function App() {
           <section className="timeline">
             <div className="timelineScroll">
               <DashboardView
+                key={`dashboard:${demoDataRevision}`}
                 selectedDayKey={dayKey}
+                nowTs={appNowTs}
                 categories={categoryDefs}
                 onJumpToDay={(k) => {
                   setDayKey(k)
@@ -2544,9 +2637,13 @@ export function App() {
       <QuickAccess
         platform={platform}
         dayKey={dayKey}
+        nowTs={appNowTs}
         recording={recording}
         onNavigate={(target) => {
-          if (target === 'reflect') setView('review')
+          if (target === 'today') {
+            setDayKey(dayKeyFromUnixSeconds(appNowTs))
+            setView('today')
+          } else if (target === 'reflect') setView('review')
           else if (target === 'insights') setView('dashboard')
           else setView(target)
         }}
@@ -2558,7 +2655,7 @@ export function App() {
   )
 
   function getAskScope(): { startTs: number; endTs: number; label: string } {
-    const nowDayKey = dayKeyFromUnixSeconds(Math.floor(Date.now() / 1000))
+    const nowDayKey = dayKeyFromUnixSeconds(appNowTs)
     if (askScopePreset === 'today') {
       const w = dayWindowForDayKey(nowDayKey)
       return { startTs: w.startTs, endTs: w.endTs, label: `Today (${nowDayKey})` }
@@ -2652,7 +2749,7 @@ function pageTitle(view: View): string {
 }
 
 function pageSubtitle(view: View, dayKey: string): string {
-  if (view === 'today') return formatFriendlyDay(dayKeyFromUnixSeconds(Math.floor(Date.now() / 1000)))
+  if (view === 'today') return formatFriendlyDay(dayKey)
   if (view === 'timeline') return `A detailed record of ${formatFriendlyDay(dayKey)}`
   if (view === 'review') return `Review ${formatFriendlyDay(dayKey)}`
   if (view === 'dashboard') return 'Patterns across your time and attention'
@@ -2675,9 +2772,10 @@ function addDaysToDayKey(dayKey: string, deltaDays: number): string {
 
 function getTimelineSearchScope(
   preset: 'day' | 'today' | 'yesterday' | 'last7' | 'last30' | 'all',
-  selectedDayKey: string
+  selectedDayKey: string,
+  nowTs: number
 ): { startTs: number; endTs: number } {
-  const nowDayKey = dayKeyFromUnixSeconds(Math.floor(Date.now() / 1000))
+  const nowDayKey = dayKeyFromUnixSeconds(nowTs)
 
   if (preset === 'today') return dayWindowForDayKey(nowDayKey)
   if (preset === 'yesterday') return dayWindowForDayKey(addDaysToDayKey(nowDayKey, -1))
