@@ -46,6 +46,13 @@ contextBridge.exposeInMainWorld('chrona', {
   setGeminiApiKey: (apiKey: string) => invoke('gemini:setApiKey', { apiKey }),
   hasGeminiApiKey: () => invoke('gemini:hasApiKey', undefined),
   testGeminiApiKey: (apiKey?: string | null) => invoke('gemini:testApiKey', { apiKey }),
+  getAIProviderStatus: () => invoke('ai:getProviderStatus', undefined),
+  setLocalBearerToken: (token: string) => invoke('local:setToken', { token }),
+  clearLocalBearerToken: () => invoke('local:clearToken', undefined),
+  discoverLocalModels: (baseUrl?: string | null, token?: string | null) =>
+    invoke('local:discoverModels', { baseUrl, token }),
+  testLocalAI: (req: IpcContract['local:testConnection']['req']) =>
+    invoke('local:testConnection', req),
 
   getTimelineDay: (dayKey: string) => invoke('timeline:getDay', { dayKey }),
   getTimelineCardObservations: (cardId: number) =>
@@ -71,10 +78,10 @@ contextBridge.exposeInMainWorld('chrona', {
   upsertJournalEntry: (dayKey: string, patch: IpcContract['journal:upsert']['req']['patch']) =>
     invoke('journal:upsert', { dayKey, patch }),
   deleteJournalEntry: (dayKey: string) => invoke('journal:delete', { dayKey }),
-  draftJournalWithGemini: (
+  draftJournalWithAI: (
     dayKey: string,
     options?: { includeObservations?: boolean; includeReview?: boolean }
-  ) => invoke('journal:draftWithGemini', { dayKey, options }),
+  ) => invoke('journal:draftWithAI', { dayKey, options }),
   copyJournalDayToClipboard: (dayKey: string) => invoke('journal:copyDayToClipboard', { dayKey }),
   saveJournalMarkdownRange: (startDayKey: string, endDayKey: string) =>
     invoke('journal:saveMarkdownRange', { startDayKey, endDayKey }),
@@ -212,6 +219,13 @@ export type ChronaApi = {
   setGeminiApiKey: (apiKey: string) => InvokeResult<'gemini:setApiKey'>
   hasGeminiApiKey: () => InvokeResult<'gemini:hasApiKey'>
   testGeminiApiKey: (apiKey?: string | null) => InvokeResult<'gemini:testApiKey'>
+  getAIProviderStatus: () => InvokeResult<'ai:getProviderStatus'>
+  setLocalBearerToken: (token: string) => InvokeResult<'local:setToken'>
+  clearLocalBearerToken: () => InvokeResult<'local:clearToken'>
+  discoverLocalModels: (baseUrl?: string | null, token?: string | null) =>
+    InvokeResult<'local:discoverModels'>
+  testLocalAI: (req: IpcContract['local:testConnection']['req']) =>
+    InvokeResult<'local:testConnection'>
 
   getTimelineDay: (dayKey: string) => InvokeResult<'timeline:getDay'>
   getTimelineCardObservations: (cardId: number) => InvokeResult<'timeline:getCardObservations'>
@@ -240,10 +254,10 @@ export type ChronaApi = {
     patch: IpcContract['journal:upsert']['req']['patch']
   ) => InvokeResult<'journal:upsert'>
   deleteJournalEntry: (dayKey: string) => InvokeResult<'journal:delete'>
-  draftJournalWithGemini: (
+  draftJournalWithAI: (
     dayKey: string,
     options?: { includeObservations?: boolean; includeReview?: boolean }
-  ) => InvokeResult<'journal:draftWithGemini'>
+  ) => InvokeResult<'journal:draftWithAI'>
   copyJournalDayToClipboard: (dayKey: string) => InvokeResult<'journal:copyDayToClipboard'>
   saveJournalMarkdownRange: (startDayKey: string, endDayKey: string) => InvokeResult<'journal:saveMarkdownRange'>
 

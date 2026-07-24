@@ -80,6 +80,17 @@ export function App() {
   const [geminiRequestTimeoutMs, setGeminiRequestTimeoutMs] = useState<number>(60_000)
   const [geminiMaxAttempts, setGeminiMaxAttempts] = useState<number>(3)
   const [geminiLogBodies, setGeminiLogBodies] = useState<boolean>(false)
+  const [aiProvider, setAIProvider] = useState<'gemini' | 'local'>('gemini')
+  const [localBaseUrl, setLocalBaseUrl] = useState<string>('http://127.0.0.1:11434/v1')
+  const [localTokenInput, setLocalTokenInput] = useState<string>('')
+  const [localVisionModel, setLocalVisionModel] = useState<string>('')
+  const [localTextModel, setLocalTextModel] = useState<string>('')
+  const [localRequestTimeoutMs, setLocalRequestTimeoutMs] = useState<number>(300_000)
+  const [localMaxAttempts, setLocalMaxAttempts] = useState<number>(2)
+  const [localLogBodies, setLocalLogBodies] = useState<boolean>(false)
+  const [localVisionMaxImagesPerRequest, setLocalVisionMaxImagesPerRequest] = useState<number>(12)
+  const [localModels, setLocalModels] = useState<string[]>([])
+  const [localAILine, setLocalAILine] = useState<string>('')
 
   const [promptPreambleTranscribe, setPromptPreambleTranscribe] = useState<string>('')
   const [promptPreambleCards, setPromptPreambleCards] = useState<string>('')
@@ -330,6 +341,16 @@ export function App() {
       setGeminiRequestTimeoutMs(Number((settings as any).geminiRequestTimeoutMs ?? 60_000) || 60_000)
       setGeminiMaxAttempts(Number((settings as any).geminiMaxAttempts ?? 3) || 3)
       setGeminiLogBodies(!!(settings as any).geminiLogBodies)
+      setAIProvider((settings as any).aiProvider === 'local' ? 'local' : 'gemini')
+      setLocalBaseUrl(String((settings as any).localBaseUrl ?? 'http://127.0.0.1:11434/v1'))
+      setLocalVisionModel(String((settings as any).localVisionModel ?? ''))
+      setLocalTextModel(String((settings as any).localTextModel ?? ''))
+      setLocalRequestTimeoutMs(Number((settings as any).localRequestTimeoutMs ?? 300_000) || 300_000)
+      setLocalMaxAttempts(Number((settings as any).localMaxAttempts ?? 2) || 2)
+      setLocalLogBodies(!!(settings as any).localLogBodies)
+      setLocalVisionMaxImagesPerRequest(
+        Number((settings as any).localVisionMaxImagesPerRequest ?? 12) || 12
+      )
 
       setPromptPreambleTranscribe(String((settings as any).promptPreambleTranscribe ?? ''))
       setPromptPreambleCards(String((settings as any).promptPreambleCards ?? ''))
@@ -952,6 +973,68 @@ export function App() {
     } as any)
   }
 
+  async function onChangeAIProvider(provider: 'gemini' | 'local') {
+    setAIProvider(provider)
+    await window.chrona.updateSettings({ aiProvider: provider })
+    await refreshSetupStatus()
+  }
+
+  async function onSaveLocalAI() {
+    const timeoutMs = Math.max(1000, Math.floor(Number(localRequestTimeoutMs)))
+    const attempts = Math.max(1, Math.floor(Number(localMaxAttempts)))
+    const maxImages = Math.max(2, Math.floor(Number(localVisionMaxImagesPerRequest)))
+    setLocalAILine('Saving…')
+    try {
+      await window.chrona.updateSettings({
+        localBaseUrl: localBaseUrl.trim(),
+        localVisionModel: localVisionModel.trim(),
+        localTextModel: localTextModel.trim(),
+        localRequestTimeoutMs: timeoutMs,
+        localMaxAttempts: attempts,
+        localLogBodies,
+        localVisionMaxImagesPerRequest: maxImages
+      })
+      if (localTokenInput.trim()) {
+        await window.chrona.setLocalBearerToken(localTokenInput)
+        setLocalTokenInput('')
+      }
+      setLocalAILine('Saved')
+      await refreshSetupStatus()
+    } catch (error) {
+      setLocalAILine(`Save failed: ${error instanceof Error ? error.message : String(error)}`)
+    }
+  }
+
+  async function onClearLocalToken() {
+    await window.chrona.clearLocalBearerToken()
+    setLocalTokenInput('')
+    setLocalAILine('Token cleared')
+    await refreshSetupStatus()
+  }
+
+  async function onDiscoverLocalModels() {
+    setLocalAILine('Discovering models…')
+    try {
+      const result = await window.chrona.discoverLocalModels(localBaseUrl, localTokenInput || null)
+      setLocalModels(result.models.map((model) => model.id))
+      setLocalAILine(`Found ${result.models.length} model${result.models.length === 1 ? '' : 's'}`)
+    } catch (error) {
+      setLocalAILine(`Discovery failed: ${error instanceof Error ? error.message : String(error)}`)
+    }
+  }
+
+  async function onTestLocalAI(kind: 'server' | 'text' | 'vision') {
+    setLocalAILine(`Testing ${kind}…`)
+    const model = kind === 'vision' ? localVisionModel : kind === 'text' ? localTextModel : null
+    const result = await window.chrona.testLocalAI({
+      kind,
+      baseUrl: localBaseUrl,
+      token: localTokenInput || null,
+      model
+    })
+    setLocalAILine(`${result.ok ? 'OK' : 'Failed'}: ${result.message}`)
+  }
+
   async function onSavePromptPreambles() {
     await window.chrona.updateSettings({
       promptPreambleTranscribe: promptPreambleTranscribe as any,
@@ -1148,13 +1231,13 @@ export function App() {
     setJournalSaveLine('Deleted')
   }
 
-  async function onJournalDraftWithGemini() {
+  async function onJournalDraftWithAI() {
     const k = dayKey
     setJournalDraftLoading(true)
     setJournalDraftError(null)
     setJournalDraft(null)
     try {
-      const res = await window.chrona.draftJournalWithGemini(k, {
+      const res = await window.chrona.draftJournalWithAI(k, {
         includeObservations: journalDraftIncludeObservations,
         includeReview: journalDraftIncludeReview
       })
@@ -1570,14 +1653,16 @@ export function App() {
         </div>
       ) : null}
 
-      {setupStatus && !setupStatus.hasGeminiKey ? (
+      {setupStatus && !setupStatus.aiConfigured ? (
         <div className="setupBanner">
           <div className="setupBannerLeft">
-            <div className="setupBannerTitle">Gemini API key missing</div>
-            <div className="setupBannerMeta">Recording works, but analysis will stay pending until a key is configured.</div>
+            <div className="setupBannerTitle">AI provider needs configuration</div>
+            <div className="setupBannerMeta">
+              Recording works, but analysis will stay pending until {setupStatus.aiProvider === 'local' ? 'local models are configured' : 'a Gemini key is configured'}.
+            </div>
           </div>
           <button className="btn" onClick={() => setView('onboarding')}>
-            Add key
+            Configure AI
           </button>
         </div>
       ) : null}
@@ -1594,7 +1679,7 @@ export function App() {
                 recording={recording}
                 systemPaused={systemPaused}
                 lastError={lastError}
-                hasGeminiKey={hasGeminiKey}
+                hasGeminiKey={setupStatus?.aiConfigured ?? hasGeminiKey}
                 onToggleRecording={onToggleRecording}
                 onOpenTimeline={(cardId) => {
                   const todayKey = dayKeyFromUnixSeconds(appNowTs)
@@ -2116,6 +2201,31 @@ export function App() {
                   geminiLogBodies={geminiLogBodies}
                   setGeminiLogBodies={setGeminiLogBodies}
                   onSaveGeminiRuntime={onSaveGeminiRuntime}
+                  aiProvider={aiProvider}
+                  onChangeAIProvider={onChangeAIProvider}
+                  hasLocalToken={setupStatus?.hasLocalToken ?? null}
+                  localBaseUrl={localBaseUrl}
+                  setLocalBaseUrl={setLocalBaseUrl}
+                  localTokenInput={localTokenInput}
+                  setLocalTokenInput={setLocalTokenInput}
+                  localVisionModel={localVisionModel}
+                  setLocalVisionModel={setLocalVisionModel}
+                  localTextModel={localTextModel}
+                  setLocalTextModel={setLocalTextModel}
+                  localRequestTimeoutMs={localRequestTimeoutMs}
+                  setLocalRequestTimeoutMs={setLocalRequestTimeoutMs}
+                  localMaxAttempts={localMaxAttempts}
+                  setLocalMaxAttempts={setLocalMaxAttempts}
+                  localLogBodies={localLogBodies}
+                  setLocalLogBodies={setLocalLogBodies}
+                  localVisionMaxImagesPerRequest={localVisionMaxImagesPerRequest}
+                  setLocalVisionMaxImagesPerRequest={setLocalVisionMaxImagesPerRequest}
+                  localModels={localModels}
+                  localAILine={localAILine}
+                  onSaveLocalAI={onSaveLocalAI}
+                  onClearLocalToken={onClearLocalToken}
+                  onDiscoverLocalModels={onDiscoverLocalModels}
+                  onTestLocalAI={onTestLocalAI}
                   promptPreambleTranscribe={promptPreambleTranscribe}
                   setPromptPreambleTranscribe={setPromptPreambleTranscribe}
                   promptPreambleCards={promptPreambleCards}
@@ -2179,7 +2289,7 @@ export function App() {
             <div className="sidePanel">
               <div className="sideTitle">Setup status</div>
               <div className="sideMeta">
-                Gemini key: {setupStatus ? (setupStatus.hasGeminiKey ? 'configured' : 'missing') : '...'}
+                AI: {setupStatus ? `${setupStatus.aiProvider} ${setupStatus.aiConfigured ? 'configured' : 'missing configuration'}` : '...'}
                 {setupStatus?.platform === 'darwin'
                   ? ` · Capture: ${setupStatus.captureAccess.status === 'granted' ? 'granted' : 'missing'}`
                   : ''}
@@ -2262,7 +2372,7 @@ export function App() {
               <div className="block">
                 <div className="sideTitle">System</div>
                 <div className="sideMeta">
-                  Gemini key: {hasGeminiKey === null ? '...' : hasGeminiKey ? 'configured' : 'missing'} · Capture:
+                  AI: {setupStatus ? `${setupStatus.aiProvider} ${setupStatus.aiConfigured ? 'configured' : 'missing configuration'}` : '...'} · Capture:
                   {recording ? ' recording' : ' idle'}
                 </div>
                 <div className="row">
@@ -2299,7 +2409,7 @@ export function App() {
               <div className="block">
                 <div className="sideTitle">Settings</div>
                 <div className="sideMeta">
-                  Gemini key: {hasGeminiKey === null ? '...' : hasGeminiKey ? 'configured' : 'missing'}
+                  AI: {setupStatus ? `${setupStatus.aiProvider} ${setupStatus.aiConfigured ? 'configured' : 'missing configuration'}` : '...'}
                 </div>
                 <div className="row">
                   <button className="btn" onClick={() => setView('settings')}>
@@ -2311,7 +2421,7 @@ export function App() {
           ) : view === 'journal' ? (
             <div className="sidePanel">
               <div className="sideTitle">Journal tools</div>
-              <div className="sideMeta">Draft with Gemini uses timeline text (and optionally observations).</div>
+              <div className="sideMeta">Draft with AI uses timeline text (and optionally observations).</div>
 
               <div className="field">
                 <div className="label">Status</div>
@@ -2326,9 +2436,9 @@ export function App() {
               </div>
 
               <div className="block">
-                <div className="sideTitle">Gemini draft</div>
+                <div className="sideTitle">AI draft</div>
                 <div className="sideMeta">
-                  Key: {hasGeminiKey === null ? '...' : hasGeminiKey ? 'configured' : 'missing'}
+                  Provider: {setupStatus ? `${setupStatus.aiProvider} · ${setupStatus.aiConfigured ? 'configured' : 'missing configuration'}` : '...'}
                 </div>
 
                 <div className="row">
@@ -2370,9 +2480,9 @@ export function App() {
                   <button
                     className="btn btn-accent"
                     disabled={journalDraftLoading}
-                    onClick={() => void onJournalDraftWithGemini()}
+                    onClick={() => void onJournalDraftWithAI()}
                   >
-                    {journalDraftLoading ? 'Drafting…' : 'Draft with Gemini'}
+                    {journalDraftLoading ? 'Drafting…' : 'Draft with AI'}
                   </button>
                   <button
                     className="btn"
@@ -2450,7 +2560,7 @@ export function App() {
               <div className="block">
                 <div className="sideTitle">Settings</div>
                 <div className="sideMeta">
-                  Gemini key: {hasGeminiKey === null ? '...' : hasGeminiKey ? 'configured' : 'missing'}
+                  AI: {setupStatus ? `${setupStatus.aiProvider} ${setupStatus.aiConfigured ? 'configured' : 'missing configuration'}` : '...'}
                 </div>
                 <div className="row">
                   <button className="btn" onClick={() => setView('settings')}>

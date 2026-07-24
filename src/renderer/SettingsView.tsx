@@ -92,6 +92,32 @@ export function SettingsView(props: {
   setGeminiLogBodies: (b: boolean) => void
   onSaveGeminiRuntime: () => Promise<void>
 
+  aiProvider: 'gemini' | 'local'
+  onChangeAIProvider: (provider: 'gemini' | 'local') => Promise<void>
+  hasLocalToken: boolean | null
+  localBaseUrl: string
+  setLocalBaseUrl: (s: string) => void
+  localTokenInput: string
+  setLocalTokenInput: (s: string) => void
+  localVisionModel: string
+  setLocalVisionModel: (s: string) => void
+  localTextModel: string
+  setLocalTextModel: (s: string) => void
+  localRequestTimeoutMs: number
+  setLocalRequestTimeoutMs: (n: number) => void
+  localMaxAttempts: number
+  setLocalMaxAttempts: (n: number) => void
+  localLogBodies: boolean
+  setLocalLogBodies: (b: boolean) => void
+  localVisionMaxImagesPerRequest: number
+  setLocalVisionMaxImagesPerRequest: (n: number) => void
+  localModels: string[]
+  localAILine: string
+  onSaveLocalAI: () => Promise<void>
+  onClearLocalToken: () => Promise<void>
+  onDiscoverLocalModels: () => Promise<void>
+  onTestLocalAI: (kind: 'server' | 'text' | 'vision') => Promise<void>
+
   promptPreambleTranscribe: string
   setPromptPreambleTranscribe: (s: string) => void
   promptPreambleCards: string
@@ -264,7 +290,7 @@ export function SettingsView(props: {
             </div>
             <div className="block">
               <div className="sideTitle">Setup</div>
-              <div className="sideMeta">Review privacy, capture permission, and your optional Gemini key.</div>
+              <div className="sideMeta">Review privacy, capture permission, and your optional AI provider.</div>
               <div className="row"><button className="btn" onClick={props.onRunSetup}>Run setup again</button></div>
             </div>
           </div>
@@ -982,8 +1008,24 @@ export function SettingsView(props: {
 
         {active === 'intelligence' ? (
           <div className="settingsSection">
-            <div className="sideTitle">AI (Gemini)</div>
-            <div className="sideMeta">Configure the Gemini API key, model, and runtime options.</div>
+            <div className="sideTitle">AI provider</div>
+            <div className="sideMeta">Choose one provider for analysis, Ask, and journal drafts.</div>
+
+            <div className="block">
+              <label className="label">
+                Provider
+                <select
+                  className="input"
+                  value={props.aiProvider}
+                  onChange={(event) => void props.onChangeAIProvider(event.target.value as 'gemini' | 'local')}
+                >
+                  <option value="gemini">Gemini</option>
+                  <option value="local">Local (Ollama / LM Studio)</option>
+                </select>
+              </label>
+            </div>
+
+            {props.aiProvider === 'gemini' ? <>
 
             <div className="block">
               <div className="sideTitle">API key</div>
@@ -1080,6 +1122,109 @@ export function SettingsView(props: {
                 </button>
               </div>
             </div>
+            </> : (
+              <>
+                <div className="block">
+                  <div className="sideTitle">Local server</div>
+                  <div className="sideMeta">
+                    Only loopback addresses are accepted. Screenshots never leave this computer in local mode.
+                  </div>
+                  <div className="row">
+                    <label className="label">
+                      OpenAI-compatible base URL
+                      <input
+                        className="input"
+                        value={props.localBaseUrl}
+                        onChange={(event) => props.setLocalBaseUrl(event.target.value)}
+                        placeholder="http://127.0.0.1:11434/v1"
+                      />
+                    </label>
+                    <button className="btn" onClick={() => void props.onDiscoverLocalModels()}>Refresh models</button>
+                    <button className="btn" onClick={() => void props.onTestLocalAI('server')}>Test server</button>
+                  </div>
+                </div>
+
+                <div className="block">
+                  <div className="sideTitle">Optional Bearer token</div>
+                  <div className="sideMeta">
+                    Token: {props.hasLocalToken === null ? '...' : props.hasLocalToken ? 'configured' : 'not configured'}.
+                    Stored in the OS credential store.
+                  </div>
+                  <div className="row">
+                    <input
+                      className="input"
+                      type="password"
+                      value={props.localTokenInput}
+                      onChange={(event) => props.setLocalTokenInput(event.target.value)}
+                      placeholder="Optional token"
+                    />
+                    <button className="btn" onClick={() => void props.onClearLocalToken()}>Clear token</button>
+                  </div>
+                </div>
+
+                <div className="block">
+                  <div className="sideTitle">Models</div>
+                  <datalist id="local-ai-models">
+                    {props.localModels.map((model) => <option key={model} value={model} />)}
+                  </datalist>
+                  <div className="row">
+                    <label className="label">
+                      Vision model ID
+                      <input
+                        className="input"
+                        list="local-ai-models"
+                        value={props.localVisionModel}
+                        onChange={(event) => props.setLocalVisionModel(event.target.value)}
+                        placeholder="e.g. qwen2.5vl:7b"
+                      />
+                    </label>
+                    <button className="btn" onClick={() => void props.onTestLocalAI('vision')}>Test vision</button>
+                  </div>
+                  <div className="row">
+                    <label className="label">
+                      Text model ID
+                      <input
+                        className="input"
+                        list="local-ai-models"
+                        value={props.localTextModel}
+                        onChange={(event) => props.setLocalTextModel(event.target.value)}
+                        placeholder="e.g. llama3.2:3b"
+                      />
+                    </label>
+                    <button className="btn" onClick={() => void props.onTestLocalAI('text')}>Test text</button>
+                  </div>
+                </div>
+
+                <div className="block">
+                  <div className="sideTitle">Runtime</div>
+                  <div className="row">
+                    <label className="label">Request timeout (ms)
+                      <input className="input" type="number" min={1000} step={1000} value={props.localRequestTimeoutMs}
+                        onChange={(event) => props.setLocalRequestTimeoutMs(Number(event.target.value))} />
+                    </label>
+                    <label className="label">Max attempts
+                      <input className="input" type="number" min={1} value={props.localMaxAttempts}
+                        onChange={(event) => props.setLocalMaxAttempts(Number(event.target.value))} />
+                    </label>
+                    <label className="label">Images per vision request
+                      <input className="input" type="number" min={2} value={props.localVisionMaxImagesPerRequest}
+                        onChange={(event) => props.setLocalVisionMaxImagesPerRequest(Number(event.target.value))} />
+                    </label>
+                  </div>
+                  <div className="row">
+                    <label className="pill">
+                      <input type="checkbox" checked={props.localLogBodies}
+                        onChange={(event) => props.setLocalLogBodies(event.target.checked)} />
+                      Verbose LLM logging (images always omitted)
+                    </label>
+                  </div>
+                  <div className="row">
+                    <button className="btn btn-accent" onClick={() => void props.onSaveLocalAI()}>Save local settings</button>
+                    {props.localAILine ? <div className="mono">{props.localAILine}</div> : null}
+                  </div>
+                </div>
+              </>
+            )}
           </div>
         ) : null}
 

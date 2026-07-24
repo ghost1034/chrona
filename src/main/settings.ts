@@ -5,7 +5,7 @@ import type { BlurRegion } from '../shared/blurRegions'
 import type { Settings } from '../shared/ipc'
 
 const DEFAULT_SETTINGS: Settings = {
-  version: 11,
+  version: 12,
   themePreference: 'system',
   captureIntervalSeconds: 10,
   captureSelectedDisplayId: null,
@@ -66,6 +66,15 @@ const DEFAULT_SETTINGS: Settings = {
   geminiMaxAttempts: 3,
   geminiLogBodies: false,
 
+  aiProvider: 'gemini',
+  localBaseUrl: 'http://127.0.0.1:11434/v1',
+  localVisionModel: '',
+  localTextModel: '',
+  localRequestTimeoutMs: 300_000,
+  localMaxAttempts: 2,
+  localLogBodies: false,
+  localVisionMaxImagesPerRequest: 12,
+
   promptPreambleTranscribe: '',
   promptPreambleCards: '',
   promptPreambleAsk: '',
@@ -124,14 +133,15 @@ export class SettingsStore {
         parsed?.version !== 8 &&
         parsed?.version !== 9 &&
         parsed?.version !== 10 &&
-        parsed?.version !== 11
+        parsed?.version !== 11 &&
+        parsed?.version !== 12
       ) {
         return DEFAULT_SETTINGS
       }
 
       // Migration: do not force onboarding UI for existing users.
       const fromExistingUser = parsed?.version <= 5
-      const merged: Settings = { ...DEFAULT_SETTINGS, ...parsed, version: 11 }
+      const merged: Settings = { ...DEFAULT_SETTINGS, ...parsed, version: 12 }
       if (!['system', 'light', 'dark'].includes(String(parsed?.themePreference ?? ''))) {
         merged.themePreference = 'system'
       }
@@ -144,6 +154,14 @@ export class SettingsStore {
 
       merged.blurRegions = sanitizeBlurRegions(merged.blurRegions)
       if (typeof merged.blurHotkey !== 'string') merged.blurHotkey = DEFAULT_BLUR_HOTKEY
+      if (merged.aiProvider !== 'gemini' && merged.aiProvider !== 'local') {
+        merged.aiProvider = 'gemini'
+      }
+      try {
+        merged.localBaseUrl = normalizeLoopbackBaseUrl(merged.localBaseUrl)
+      } catch {
+        merged.localBaseUrl = DEFAULT_SETTINGS.localBaseUrl
+      }
 
       return merged
     } catch {
@@ -156,8 +174,13 @@ export class SettingsStore {
     const next: Settings = {
       ...current,
       ...patch,
-      version: 11
+      version: 12
     }
+
+    if (patch.localBaseUrl !== undefined) {
+      next.localBaseUrl = normalizeLoopbackBaseUrl(patch.localBaseUrl)
+    }
+    if (next.aiProvider !== 'gemini' && next.aiProvider !== 'local') next.aiProvider = 'gemini'
 
     await fs.mkdir(path.dirname(this.filePath), { recursive: true })
     await fs.writeFile(this.filePath, JSON.stringify(next, null, 2) + '\n', 'utf8')
@@ -171,4 +194,29 @@ export class SettingsStore {
       return null
     }
   }
+}
+
+export function normalizeLoopbackBaseUrl(value: unknown): string {
+  const raw = String(value ?? '').trim()
+  if (!raw) throw new Error('Local server URL is required')
+
+  let url: URL
+  try {
+    url = new URL(raw)
+  } catch {
+    throw new Error('Local server URL is invalid')
+  }
+  if (url.protocol !== 'http:') throw new Error('Local server URL must use http://')
+  if (url.username || url.password) throw new Error('Local server URL cannot contain credentials')
+  if (url.search || url.hash) throw new Error('Local server URL cannot contain a query or fragment')
+
+  const host = url.hostname.toLowerCase()
+  const isLoopback =
+    host === 'localhost' ||
+    host === '::1' || host === '[::1]' ||
+    /^127(?:\.[0-9]{1,3}){3}$/.test(host) && host.split('.').slice(1).every((part) => Number(part) <= 255)
+  if (!isLoopback) throw new Error('Local server URL must use a loopback host')
+
+  url.pathname = url.pathname.replace(/\/+$/, '') || '/v1'
+  return url.toString().replace(/\/$/, '')
 }

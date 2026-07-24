@@ -81,7 +81,7 @@ describe('redesigned application workflows', () => {
     expect((await screen.findAllByText(/macOS Screen Recording permission/)).length).toBeGreaterThan(0)
     expect(screen.getByText(/Status: missing/)).toBeInTheDocument()
 
-    await user.click(screen.getByRole('button', { name: 'Settings' }))
+    await user.click(screen.getAllByRole('button', { name: 'Settings' })[0]!)
     await user.click(await screen.findByRole('button', { name: 'Data & Sync' }))
     await user.click(screen.getByRole('button', { name: 'Purge now' }))
     expect(purgeStorage).not.toHaveBeenCalled()
@@ -130,5 +130,48 @@ describe('redesigned application workflows', () => {
     await user.keyboard('{Meta>}{Shift>}h{/Shift}{/Meta}')
     expect(await screen.findByText('Plan project milestones')).toBeInTheDocument()
     expect(updateSettings).toHaveBeenLastCalledWith(expect.objectContaining({ demoCardsHidden: false }))
+  })
+
+  it('switches to local AI, discovers models, and keeps manual model entry editable', async () => {
+    const user = userEvent.setup()
+    const api = createChronaFixture('populated')
+    const updateSettings = vi.fn(async (patch: any) => ({ ...patch }) as any)
+    const discoverLocalModels = vi.fn(async () => ({ models: [{ id: 'vision-local' }, { id: 'text-local' }] }))
+    api.updateSettings = updateSettings
+    api.discoverLocalModels = discoverLocalModels
+    window.chrona = api
+    render(<App />)
+
+    await screen.findByRole('heading', { name: 'Capture is healthy' })
+    await user.click(screen.getAllByRole('button', { name: 'Settings' })[0]!)
+    await user.click(await screen.findByRole('button', { name: 'Intelligence' }))
+    await user.selectOptions(screen.getByLabelText('Provider'), 'local')
+
+    expect(updateSettings).toHaveBeenCalledWith({ aiProvider: 'local' })
+    expect(screen.queryByPlaceholderText('AIza...')).not.toBeInTheDocument()
+    const visionInput = screen.getByPlaceholderText('e.g. qwen2.5vl:7b')
+    await user.click(screen.getByRole('button', { name: 'Refresh models' }))
+    expect(await screen.findByText('Found 2 models')).toBeInTheDocument()
+    await user.clear(visionInput)
+    await user.type(visionInput, 'manual-vision-id')
+    expect(visionInput).toHaveValue('manual-vision-id')
+  })
+
+  it('offers Gemini and local AI during onboarding and surfaces discovery errors', async () => {
+    const user = userEvent.setup()
+    const api = createChronaFixture('ai-missing')
+    api.discoverLocalModels = vi.fn(async () => {
+      throw new Error('server unavailable')
+    })
+    window.chrona = api
+    render(<App />)
+
+    await screen.findByRole('heading', { name: 'Capture is healthy' })
+    await user.click(screen.getByRole('button', { name: 'Help & setup' }))
+    await user.click(screen.getByRole('button', { name: 'Next' }))
+    await user.click(screen.getByRole('button', { name: 'Next' }))
+    await user.selectOptions(screen.getByLabelText('Provider'), 'local')
+    await user.click(screen.getByRole('button', { name: 'Refresh models' }))
+    expect(await screen.findByText('Discovery failed: server unavailable')).toBeInTheDocument()
   })
 })

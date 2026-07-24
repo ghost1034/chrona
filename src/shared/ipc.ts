@@ -4,7 +4,7 @@ export type AppPingResponse = {
 }
 
 export type Settings = {
-  version: 11
+  version: 12
   themePreference: 'system' | 'light' | 'dark'
   captureIntervalSeconds: number
   captureSelectedDisplayId: string | null
@@ -39,6 +39,15 @@ export type Settings = {
   geminiMaxAttempts: number
   geminiLogBodies: boolean
 
+  aiProvider: 'gemini' | 'local'
+  localBaseUrl: string
+  localVisionModel: string
+  localTextModel: string
+  localRequestTimeoutMs: number
+  localMaxAttempts: number
+  localLogBodies: boolean
+  localVisionMaxImagesPerRequest: number
+
   promptPreambleTranscribe: string
   promptPreambleCards: string
   promptPreambleAsk: string
@@ -68,7 +77,22 @@ export type CaptureAccessInfo = {
 export type SetupStatus = {
   platform: NodeJS.Platform
   hasGeminiKey: boolean
+  hasLocalToken: boolean
+  aiProvider: 'gemini' | 'local'
+  aiConfigured: boolean
   captureAccess: CaptureAccessInfo
+}
+
+export type LocalModelInfo = { id: string }
+
+export type AIProviderStatus = {
+  provider: 'gemini' | 'local'
+  configured: boolean
+  hasGeminiKey: boolean
+  hasLocalToken: boolean
+  localBaseUrl: string
+  localVisionModel: string
+  localTextModel: string
 }
 
 export type CaptureState = {
@@ -231,6 +255,32 @@ export type IpcContract = {
     res: { ok: boolean; message: string }
   }
 
+  'ai:getProviderStatus': {
+    req: void
+    res: AIProviderStatus
+  }
+  'local:setToken': {
+    req: { token: string }
+    res: { ok: true }
+  }
+  'local:clearToken': {
+    req: void
+    res: { ok: true }
+  }
+  'local:discoverModels': {
+    req: { baseUrl?: string | null; token?: string | null }
+    res: { models: LocalModelInfo[] }
+  }
+  'local:testConnection': {
+    req: {
+      kind: 'server' | 'text' | 'vision'
+      baseUrl?: string | null
+      token?: string | null
+      model?: string | null
+    }
+    res: { ok: boolean; message: string }
+  }
+
   'timeline:getDay': {
     req: { dayKey: string }
     res: { dayKey: string; cards: import('./timeline').TimelineCardDTO[] }
@@ -288,7 +338,7 @@ export type IpcContract = {
     req: { dayKey: string }
     res: { ok: true }
   }
-  'journal:draftWithGemini': {
+  'journal:draftWithAI': {
     req: {
       dayKey: string
       options?: {
@@ -441,6 +491,11 @@ export const IPC_CHANNELS = {
   geminiSetApiKey: 'gemini:setApiKey',
   geminiHasApiKey: 'gemini:hasApiKey',
   geminiTestApiKey: 'gemini:testApiKey',
+  aiGetProviderStatus: 'ai:getProviderStatus',
+  localSetToken: 'local:setToken',
+  localClearToken: 'local:clearToken',
+  localDiscoverModels: 'local:discoverModels',
+  localTestConnection: 'local:testConnection',
   timelineGetDay: 'timeline:getDay',
   timelineGetCardObservations: 'timeline:getCardObservations',
   timelineSearch: 'timeline:search',
@@ -452,7 +507,7 @@ export const IPC_CHANNELS = {
   journalGetDay: 'journal:getDay',
   journalUpsert: 'journal:upsert',
   journalDelete: 'journal:delete',
-  journalDraftWithGemini: 'journal:draftWithGemini',
+  journalDraftWithAI: 'journal:draftWithAI',
   journalCopyDayToClipboard: 'journal:copyDayToClipboard',
   journalSaveMarkdownRange: 'journal:saveMarkdownRange',
   reviewGetDay: 'review:getDay',

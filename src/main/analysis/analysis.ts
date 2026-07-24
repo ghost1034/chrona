@@ -1,9 +1,9 @@
 import type { Logger } from '../logger'
 import type { StorageService } from '../storage/storage'
 import { createScreenshotBatches } from '../../shared/batching'
-import { GeminiService } from '../gemini/gemini'
+import { AIService } from '../ai/ai'
 import type { SettingsStore } from '../settings'
-import { getGeminiApiKey } from '../gemini/keychain'
+import { isLocalRuntimeUnavailable } from '../ai/errors'
 import { dayKeyFromUnixSeconds } from '../../shared/time'
 import type { TimelapseService } from '../timelapse/timelapse'
 
@@ -26,7 +26,8 @@ export class AnalysisService {
 
   private processingInFlight = false
   private processingBatchId: number | null = null
-  private readonly gemini: GeminiService
+  private readonly ai: AIService
+  private processingResumeStatus: 'pending' | 'transcribed' | null = null
 
   constructor(opts: {
     storage: StorageService
@@ -40,7 +41,7 @@ export class AnalysisService {
     this.events = opts.events
     this.settings = opts.settings
     this.timelapse = opts.timelapse
-    this.gemini = new GeminiService({ storage: opts.storage, log: opts.log, settings: opts.settings })
+    this.ai = new AIService({ storage: opts.storage, log: opts.log, settings: opts.settings })
   }
 
   start() {
@@ -63,6 +64,11 @@ export class AnalysisService {
       const delayMs = await this.getNextCheckIntervalMs()
       this.scheduleNextTick(delayMs)
     })()
+  }
+
+  retryPendingFromSettings() {
+    if (this.stopped) return
+    void this.drainPendingBatches()
   }
 
   private scheduleNextTick(delayMs: number) {
@@ -183,10 +189,9 @@ export class AnalysisService {
   private async drainPendingBatches(): Promise<void> {
     if (this.processingInFlight) return
 
-    const apiKey = await getGeminiApiKey()
-    if (!apiKey && !process.env.CHRONA_GEMINI_MOCK) {
-      // Leave batches as pending; user can add a key later.
-      this.log.warn('analysis.geminiKeyMissing')
+    const providerStatus = await this.ai.getProviderStatus()
+    if (!providerStatus.configured) {
+      this.log.warn('analysis.aiNotConfigured', { provider: providerStatus.provider })
       return
     }
 
@@ -198,10 +203,12 @@ export class AnalysisService {
           (await this.storage.fetchNextBatchByStatus('transcribed'))
         if (!batch) return
         this.processingBatchId = batch.id
+        this.processingResumeStatus = batch.status === 'transcribed' ? 'transcribed' : 'pending'
 
         if (batch.status === 'transcribed') {
           await this.generateCardsForBatch(batch.id)
           this.processingBatchId = null
+          this.processingResumeStatus = null
           continue
         }
 
@@ -228,13 +235,15 @@ export class AnalysisService {
         })
         this.events.analysisBatchUpdated({ batchId: batch.id, status: 'processing_transcribe' })
 
-        const relPaths = screenshots.map((s) => s.filePath)
         const intervalSeconds = (await this.settings.getAll()).captureIntervalSeconds
-        const res = await this.gemini.transcribeBatch({
+        const res = await this.ai.transcribeBatch({
           batchId: batch.id,
           batchStartTs: batch.batchStartTs,
           batchEndTs: batch.batchEndTs,
-          screenshotRelPaths: relPaths,
+          screenshots: screenshots.map((screen) => ({
+            filePath: screen.filePath,
+            capturedAt: screen.capturedAt
+          })),
           screenshotIntervalSeconds: intervalSeconds
         })
 
@@ -242,6 +251,7 @@ export class AnalysisService {
           await this.storage.setBatchStatus({ batchId: batch.id, status: 'analyzed', reason: '0_observations' })
           this.events.analysisBatchUpdated({ batchId: batch.id, status: 'analyzed', reason: '0_observations' })
           this.processingBatchId = null
+          this.processingResumeStatus = null
           continue
         }
 
@@ -257,15 +267,21 @@ export class AnalysisService {
         })
 
         this.processingBatchId = null
+        this.processingResumeStatus = null
       }
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e)
       this.log.error('analysis.batchFailed', { message })
-      if (this.processingBatchId) {
+      if (this.processingBatchId && isLocalRuntimeUnavailable(e)) {
+        const status = this.processingResumeStatus ?? 'pending'
+        await this.storage.setBatchStatus({ batchId: this.processingBatchId, status, reason: message })
+        this.events.analysisBatchUpdated({ batchId: this.processingBatchId, status, reason: message })
+      } else if (this.processingBatchId) {
         await this.failBatchWithSystemCard(this.processingBatchId, message)
       }
     } finally {
       this.processingBatchId = null
+      this.processingResumeStatus = null
       this.processingInFlight = false
     }
   }
@@ -297,7 +313,7 @@ export class AnalysisService {
       includeSystem: false
     })
 
-    const cardsRes = await this.gemini.generateCards({
+    const cardsRes = await this.ai.generateCards({
       batchId,
       windowStartTs,
       windowEndTs,

@@ -2,7 +2,7 @@ import { dayKeyFromUnixSeconds } from '../../shared/time'
 import type { AskRunRequest, AskRunResponse, AskSourceRef } from '../../shared/ask'
 import type { Logger } from '../logger'
 import type { StorageService } from '../storage/storage'
-import { GeminiService } from '../gemini/gemini'
+import { AIService } from '../ai/ai'
 import { stripCodeFences } from '../gemini/cards'
 import type { ReviewRating } from '../storage/storage'
 import type { SettingsStore } from '../settings'
@@ -23,14 +23,14 @@ type TimelineCardLite = {
 export class AskService {
   private readonly storage: StorageService
   private readonly log: Logger
-  private readonly gemini: GeminiService
+  private readonly ai: AIService
   private readonly settings: SettingsStore
 
   constructor(opts: { storage: StorageService; log: Logger; settings: SettingsStore }) {
     this.storage = opts.storage
     this.log = opts.log
     this.settings = opts.settings
-    this.gemini = new GeminiService({ storage: opts.storage, log: opts.log, settings: opts.settings })
+    this.ai = new AIService({ storage: opts.storage, log: opts.log, settings: opts.settings })
   }
 
   async run(req: AskRunRequest): Promise<AskRunResponse> {
@@ -95,7 +95,7 @@ export class AskService {
       preamble: (await this.settings.getAll()).promptPreambleAsk
     })
 
-    const rawText = await this.gemini.generateJsonOnly({
+    const generation = await this.ai.generateJsonOnly({
       operation: 'ask',
       callGroupId,
       prompt,
@@ -109,7 +109,7 @@ export class AskService {
       responseJsonSchema: buildAskResponseSchema()
     })
 
-    const extracted = stripCodeFences(rawText)
+    const extracted = stripCodeFences(generation.text)
 
     let parsed: { answerMarkdown: string; sourceCardIds: number[]; followUps: string[] }
     try {
@@ -118,8 +118,8 @@ export class AskService {
         batchId: null,
         callGroupId,
         attempt: 1,
-        provider: 'gemini',
-        model: null,
+        provider: generation.provider,
+        model: generation.model,
         operation: 'ask_parse',
         status: 'success',
         requestMethod: null,
@@ -132,8 +132,8 @@ export class AskService {
         batchId: null,
         callGroupId,
         attempt: 1,
-        provider: 'gemini',
-        model: null,
+        provider: generation.provider,
+        model: generation.model,
         operation: 'ask_parse',
         status: 'failure',
         errorDomain: 'parse',

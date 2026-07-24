@@ -86,7 +86,7 @@ export function TodayView(props: {
           <span className={`statusDot ${props.lastError ? 'danger' : 'warning'}`} aria-hidden="true" />
           <div>
             <strong>{props.lastError ? 'Capture needs attention' : props.systemPaused ? 'Capture is paused' : 'Analysis is waiting'}</strong>
-            <p>{props.lastError ?? (props.systemPaused ? 'Chrona will resume when your computer is active.' : 'Add a Gemini key to analyze recorded activity.')}</p>
+            <p>{props.lastError ?? (props.systemPaused ? 'Chrona will resume when your computer is active.' : 'Configure an AI provider to analyze recorded activity.')}</p>
           </div>
           <button className="btn btn-quiet" onClick={props.onOpenSettings}>Open settings</button>
         </section>

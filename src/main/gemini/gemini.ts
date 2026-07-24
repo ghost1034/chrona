@@ -566,7 +566,7 @@ export class GeminiService {
   }
 }
 
-function buildTranscriptionPrompt(opts: { screenshotIntervalSeconds: number; preamble?: string }): string {
+export function buildTranscriptionPrompt(opts: { screenshotIntervalSeconds: number; preamble?: string }): string {
   return [
     'Return valid JSON only.',
     opts.preamble && opts.preamble.trim() ? `\nUser instructions:\n${opts.preamble.trim()}\n` : '',
@@ -588,7 +588,7 @@ function buildTranscriptionPrompt(opts: { screenshotIntervalSeconds: number; pre
   ].join('\n')
 }
 
-function buildCardGenerationPrompt(opts: {
+export function buildCardGenerationPrompt(opts: {
   windowStartTs: number
   windowEndTs: number
   observations: Array<{ startTs: number; endTs: number; observation: string }>
