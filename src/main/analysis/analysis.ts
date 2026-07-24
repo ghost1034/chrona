@@ -3,7 +3,7 @@ import type { ClaimedAnalysisBatch, StorageService } from '../storage/storage'
 import { createScreenshotBatches } from '../../shared/batching'
 import { AIService } from '../ai/ai'
 import type { SettingsStore } from '../settings'
-import { isLocalRuntimeUnavailable } from '../ai/errors'
+import { isIncompleteLocalCardCoverage, isLocalRuntimeUnavailable } from '../ai/errors'
 import { dayKeyFromUnixSeconds } from '../../shared/time'
 import type { TimelapseService } from '../timelapse/timelapse'
 
@@ -232,8 +232,27 @@ export class AnalysisService {
         await this.processClaimedBatch(claimed)
       } catch (e) {
         const message = e instanceof Error ? e.message : String(e)
-        this.log.error('analysis.batchFailed', { batchId: claimed.batch.id, message })
-        if (isLocalRuntimeUnavailable(e)) {
+        const incompleteCardCoverage = isIncompleteLocalCardCoverage(e)
+        if (incompleteCardCoverage) {
+          this.log.warn('analysis.batchCardCoverageIncomplete', {
+            batchId: claimed.batch.id,
+            message
+          })
+        } else {
+          this.log.error('analysis.batchFailed', { batchId: claimed.batch.id, message })
+        }
+        if (incompleteCardCoverage) {
+          await this.storage.setBatchStatus({
+            batchId: claimed.batch.id,
+            status: 'transcribed',
+            reason: message
+          })
+          this.events.analysisBatchUpdated({
+            batchId: claimed.batch.id,
+            status: 'transcribed',
+            reason: message
+          })
+        } else if (isLocalRuntimeUnavailable(e)) {
           await this.storage.setBatchStatus({
             batchId: claimed.batch.id,
             status: claimed.resumeStatus,
@@ -313,6 +332,8 @@ export class AnalysisService {
       batchId,
       windowStartTs,
       windowEndTs,
+      targetStartTs: batch.batchStartTs,
+      targetEndTs: batch.batchEndTs,
       observations: observations.map((o) => ({
         startTs: o.startTs,
         endTs: o.endTs,
@@ -329,8 +350,8 @@ export class AnalysisService {
     })
 
     const replaceRes = await this.storage.replaceCardsInRange({
-      fromTs: windowStartTs,
-      toTs: windowEndTs,
+      fromTs: batch.batchStartTs,
+      toTs: batch.batchEndTs,
       batchId,
       newCards: cardsRes.cards.map((c) => ({
         startTs: c.startTs,
@@ -350,7 +371,15 @@ export class AnalysisService {
     // Generate timelapses asynchronously for new cards and trimmed remnants.
     this.timelapse.enqueueCardIds([...replaceRes.insertedCardIds, ...replaceRes.trimmedCardIds])
 
-    this.emitTimelineUpdatedForRange(windowStartTs, windowEndTs)
+    const affectedStartTs = Math.min(
+      batch.batchStartTs,
+      ...cardsRes.cards.map((card) => card.startTs)
+    )
+    const affectedEndTs = Math.max(
+      batch.batchEndTs,
+      ...cardsRes.cards.map((card) => card.endTs)
+    )
+    this.emitTimelineUpdatedForRange(affectedStartTs, affectedEndTs)
 
     await this.storage.setBatchStatus({ batchId, status: 'analyzed', reason: null })
     this.events.analysisBatchUpdated({ batchId, status: 'analyzed' })

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { LocalRuntimeUnavailableError } from '../ai/errors'
+import { IncompleteLocalCardCoverageError, LocalRuntimeUnavailableError } from '../ai/errors'
 import { AnalysisService } from './analysis'
 
 function makeService(storageOverrides: Record<string, unknown> = {}) {
@@ -64,6 +64,83 @@ describe('AnalysisService batch draining', () => {
     expect(events.analysisBatchUpdated).toHaveBeenLastCalledWith(
       expect.objectContaining({ batchId: 8, status: 'pending' })
     )
+  })
+
+  it('keeps an incomplete card-coverage batch resumable without replacing the timeline', async () => {
+    const replaceCardsInRange = vi.fn()
+    const { service, storage, events } = makeService({
+      claimNextAnalysisBatch: vi.fn().mockResolvedValueOnce({
+        batch: {
+          id: 9,
+          batchStartTs: 100,
+          batchEndTs: 300,
+          status: 'processing_generate_cards',
+          reason: null,
+          createdAt: ''
+        },
+        resumeStatus: 'transcribed'
+      }),
+      getBatch: vi.fn(async () => ({ id: 9, batchStartTs: 100, batchEndTs: 300 })),
+      fetchObservationsInRange: vi.fn(async () => [
+        { startTs: 100, endTs: 300, observation: 'Development work' }
+      ]),
+      fetchCardsInRange: vi.fn(async () => []),
+      replaceCardsInRange
+    })
+    ;(service as any).ai = {
+      getProviderStatus: async () => ({ configured: true, provider: 'local' }),
+      generateCards: async () => {
+        throw new IncompleteLocalCardCoverageError([{ startTs: 150, endTs: 200 }])
+      }
+    }
+
+    await (service as any).drainPendingBatches()
+
+    expect(storage.setBatchStatus).toHaveBeenCalledWith({
+      batchId: 9,
+      status: 'transcribed',
+      reason: 'Local card generation left 50s of observed activity uncovered'
+    })
+    expect(replaceCardsInRange).not.toHaveBeenCalled()
+    expect(events.analysisBatchUpdated).toHaveBeenLastCalledWith({
+      batchId: 9,
+      status: 'transcribed',
+      reason: 'Local card generation left 50s of observed activity uncovered'
+    })
+  })
+
+  it('passes batch targets and replaces only the target range after card validation', async () => {
+    const replaceCardsInRange = vi.fn(async () => ({
+      insertedCardIds: [10], trimmedCardIds: [], removedVideoPaths: []
+    }))
+    const { service } = makeService({
+      getBatch: vi.fn(async () => ({ id: 5, batchStartTs: 200, batchEndTs: 400 })),
+      fetchObservationsInRange: vi.fn(async () => [
+        { startTs: 100, endTs: 200, observation: 'Context work' },
+        { startTs: 200, endTs: 400, observation: 'Target work' }
+      ]),
+      fetchCardsInRange: vi.fn(async () => []),
+      replaceCardsInRange
+    })
+    const generateCards = vi.fn(async () => ({ cards: [{
+      startTs: 200,
+      endTs: 400,
+      category: 'Work',
+      title: 'Target work'
+    }] }))
+    ;(service as any).ai = { generateCards }
+
+    await (service as any).generateCardsForBatch(5)
+
+    expect(generateCards).toHaveBeenCalledWith(expect.objectContaining({
+      windowEndTs: 400,
+      targetStartTs: 200,
+      targetEndTs: 400
+    }))
+    expect(replaceCardsInRange).toHaveBeenCalledWith(expect.objectContaining({
+      fromTs: 200,
+      toTs: 400
+    }))
   })
 
   it('runs concurrent startup drains as one flight and processes batches serially', async () => {

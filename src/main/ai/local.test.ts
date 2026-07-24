@@ -8,13 +8,15 @@ import {
   buildLocalCardGenerationPrompt,
   buildOverlappingChunks,
   expandSampledFrameRange,
+  findUncoveredEvidenceIntervals,
   isContextLengthError,
+  mergeCoverageIntervals,
   mergeBoundaryObservations,
   selectLocalModels,
   splitOverlappingChunk,
   validateLocalGeneratedCards
 } from './local'
-import { LocalRuntimeUnavailableError } from './errors'
+import { IncompleteLocalCardCoverageError, LocalRuntimeUnavailableError } from './errors'
 
 vi.mock('./localKeychain', () => ({ getLocalBearerToken: async () => null }))
 
@@ -121,6 +123,26 @@ describe('local AI helpers', () => {
       title: 'Task'
     })))).toThrow('more than 12 cards')
     expect(buildLocalCardGenerationPrompt('base')).toContain('overarching user tasks')
+  })
+
+  it('finds only evidence-backed gaps in generated card coverage', () => {
+    const required = mergeCoverageIntervals([
+      { startTs: 100, endTs: 180 },
+      { startTs: 180, endTs: 250 },
+      { startTs: 300, endTs: 350 }
+    ], 100, 400)
+    expect(required).toEqual([
+      { startTs: 100, endTs: 250 },
+      { startTs: 300, endTs: 350 }
+    ])
+    expect(findUncoveredEvidenceIntervals(required, [
+      { startTs: 100, endTs: 160 },
+      { startTs: 200, endTs: 325 },
+      { startTs: 340, endTs: 350 }
+    ], 100, 400)).toEqual([
+      { startTs: 160, endTs: 200 },
+      { startTs: 325, endTs: 340 }
+    ])
   })
 
   it('automatically chooses vision and text models while ignoring embedding models', () => {
@@ -354,6 +376,95 @@ describe('LocalAIService OpenAI compatibility', () => {
       cardCoverageSeconds: 200,
       cardCoverageRatio: 1
     }))
+  })
+
+  it('scopes cards to the target batch and repairs incomplete evidence coverage once', async () => {
+    const { service, calls, log } = makeService()
+    const responses = [
+      { cards: [
+        { startTs: 0, endTs: 100, category: 'Work', title: 'Prior work' },
+        { startTs: 100, endTs: 150, category: 'Work', title: 'Build' },
+        { startTs: 200, endTs: 300, category: 'Work', title: 'Test' }
+      ] },
+      { cards: [
+        { startTs: 100, endTs: 200, category: 'Work', title: 'Build' },
+        { startTs: 200, endTs: 300, category: 'Work', title: 'Test' }
+      ] }
+    ]
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        choices: [{ message: { content: JSON.stringify(responses[0]) } }]
+      })))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        choices: [{ message: { content: JSON.stringify(responses[1]) } }]
+      })))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(service.generateCards({
+      batchId: 4,
+      windowStartTs: 0,
+      windowEndTs: 300,
+      targetStartTs: 100,
+      targetEndTs: 300,
+      observations: [
+        { startTs: 0, endTs: 100, observation: 'Earlier work' },
+        { startTs: 100, endTs: 300, observation: 'Target development work' }
+      ],
+      contextCards: [{
+        startTs: 0,
+        endTs: 100,
+        category: 'Work',
+        title: 'Prior work'
+      }]
+    })).resolves.toEqual({ cards: [
+      expect.objectContaining({ startTs: 100, endTs: 200, title: 'Build' }),
+      expect.objectContaining({ startTs: 200, endTs: 300, title: 'Test' })
+    ] })
+
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    const firstBody = JSON.parse(String(fetchMock.mock.calls[0][1].body))
+    expect(firstBody.messages[0].content).toContain('Target interval: [100, 300]')
+    expect(firstBody.messages[0].content).not.toContain('Earlier work')
+    const repairBody = JSON.parse(String(fetchMock.mock.calls[1][1].body))
+    expect(repairBody.messages[0].content).toContain('left these evidence-backed intervals uncovered')
+    expect(repairBody.messages[0].content).toContain('"startTs":150,"endTs":200')
+    expect(calls.map((call) => [call.operation, call.status])).toEqual([
+      ['generate_cards', 'success'],
+      ['generate_cards_parse', 'failure'],
+      ['generate_cards_repair', 'success'],
+      ['generate_cards_repair_parse', 'success']
+    ])
+    expect(log.info).toHaveBeenCalledWith('localAI.batchTiming', expect.objectContaining({
+      batchId: 4,
+      cardCount: 2,
+      cardCoverageSeconds: 200,
+      cardCoverageRatio: 1
+    }))
+  })
+
+  it('keeps the batch resumable when an incomplete response cannot be repaired', async () => {
+    const { service } = makeService()
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        choices: [{ message: { content: JSON.stringify({ cards: [
+          { startTs: 100, endTs: 150, category: 'Work', title: 'Partial work' }
+        ] }) } }]
+      })))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        choices: [{ message: { content: '{"cards":"malformed"}' } }]
+      })))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(service.generateCards({
+      batchId: 5,
+      windowStartTs: 100,
+      windowEndTs: 300,
+      targetStartTs: 100,
+      targetEndTs: 300,
+      observations: [{ startTs: 100, endTs: 300, observation: 'Development work' }],
+      contextCards: []
+    })).rejects.toBeInstanceOf(IncompleteLocalCardCoverageError)
+    expect(fetchMock).toHaveBeenCalledTimes(2)
   })
 
   it('maps trusted frame indexes to capture timestamps and never logs image base64', async () => {

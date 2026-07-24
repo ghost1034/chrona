@@ -11,7 +11,11 @@ import {
 import { buildCardGenerationPrompt } from '../gemini/gemini'
 import { buildCardGenerationResponseSchema, type JsonSchema } from '../gemini/schemas'
 import { getLocalBearerToken } from './localKeychain'
-import { LocalRuntimeUnavailableError } from './errors'
+import {
+  IncompleteLocalCardCoverageError,
+  LocalRuntimeUnavailableError,
+  type CoverageInterval
+} from './errors'
 import type { LocalRuntime, LocalSetupResult } from '../../shared/ipc'
 import {
   buildLocalVisionStoryboards,
@@ -48,6 +52,7 @@ type LocalBatchTiming = {
 }
 
 const LOCAL_CARD_LIMIT = 12
+const LOCAL_CARD_COVERAGE_TOLERANCE_SECONDS = 1
 
 type LocalVisionObservation = {
   startFrame: number
@@ -270,6 +275,8 @@ export class LocalAIService {
     batchId: number
     windowStartTs: number
     windowEndTs: number
+    targetStartTs?: number
+    targetEndTs?: number
     observations: Array<{ startTs: number; endTs: number; observation: string }>
     contextCards: Array<{
       startTs: number
@@ -295,8 +302,28 @@ export class LocalAIService {
         allowedSubs[category].push(sub.name)
       }
     }
+    const targetStartTs = Math.max(opts.windowStartTs, opts.targetStartTs ?? opts.windowStartTs)
+    const targetEndTs = Math.min(opts.windowEndTs, opts.targetEndTs ?? opts.windowEndTs)
+    if (targetEndTs <= targetStartTs) throw new Error('Local card target window is invalid')
+    const targetObservations = opts.observations
+      .filter((observation) => observation.startTs < targetEndTs && observation.endTs > targetStartTs)
+      .map((observation) => ({
+        ...observation,
+        startTs: Math.max(targetStartTs, observation.startTs),
+        endTs: Math.min(targetEndTs, observation.endTs)
+      }))
+    const boundaryContextCards = opts.contextCards
+      .filter((card) => card.startTs < targetStartTs && card.endTs >= targetStartTs)
+      .sort((a, b) => b.endTs - a.endTs || b.startTs - a.startTs)
+      .slice(0, 1)
+    const requiredIntervals = mergeCoverageIntervals(targetObservations, targetStartTs, targetEndTs)
+    const requiredCoverageSeconds = sumIntervalSeconds(requiredIntervals)
     const prompt = buildLocalCardGenerationPrompt(buildCardGenerationPrompt({
       ...opts,
+      windowStartTs: targetStartTs,
+      windowEndTs: targetEndTs,
+      observations: targetObservations,
+      contextCards: boundaryContextCards,
       preamble: settings.promptPreambleCards,
       allowedCategories: allowed,
       categories,
@@ -305,7 +332,7 @@ export class LocalAIService {
         name: s.name,
         description: s.description
       }))
-    }))
+    }), { targetStartTs, targetEndTs, requiredIntervals })
     const callGroupId = `batch:${opts.batchId}:generate_cards:${Date.now()}`
     let cardCount: number | null = null
     let cardCoverageSeconds: number | null = null
@@ -320,26 +347,72 @@ export class LocalAIService {
         messages: [{ role: 'user', content: prompt }],
         responseJsonSchema: buildCardGenerationResponseSchema(allowed, allowedSubs, LOCAL_CARD_LIMIT)
       })
+      let candidateCards: CardGenerationCard[] = []
+      const parseAndRequireCoverage = async (
+        responseText: string,
+        parseOperation: string
+      ): Promise<CardGenerationCard[]> => {
+        try {
+          const extracted = stripCodeFences(extractOpenAIText(responseText))
+          assertLocalCardResponseOrder(extracted)
+          const parsed = parseAndValidateCardsJson({
+            jsonText: extracted,
+            windowStartTs: targetStartTs,
+            windowEndTs: targetEndTs,
+            allowedCategories: allowed,
+            allowedSubcategoriesByCategory: allowedSubs
+          })
+          if (parsed.cards.length === 0) throw new Error('Local text model returned no valid target cards')
+          candidateCards = validateLocalGeneratedCards(parsed.cards, LOCAL_CARD_LIMIT)
+          const uncovered = findUncoveredEvidenceIntervals(
+            requiredIntervals,
+            candidateCards,
+            targetStartTs,
+            targetEndTs
+          )
+          const uncoveredSeconds = sumIntervalSeconds(uncovered)
+          cardCount = candidateCards.length
+          cardCoverageSeconds = Math.max(0, requiredCoverageSeconds - uncoveredSeconds)
+          cardCoverageRatio = requiredCoverageSeconds > 0
+            ? cardCoverageSeconds / requiredCoverageSeconds
+            : 1
+          if (uncoveredSeconds > LOCAL_CARD_COVERAGE_TOLERANCE_SECONDS) {
+            throw new IncompleteLocalCardCoverageError(uncovered)
+          }
+          await this.recordParse(callGroupId, opts.batchId, cfg.textModel, parseOperation, null)
+          return candidateCards
+        } catch (error) {
+          await this.recordParse(callGroupId, opts.batchId, cfg.textModel, parseOperation, error)
+          throw error
+        }
+      }
       try {
-        const extracted = stripCodeFences(extractOpenAIText(raw.text))
-        assertLocalCardResponseOrder(extracted)
-        const parsed = parseAndValidateCardsJson({
-          jsonText: extracted,
-          windowStartTs: opts.windowStartTs,
-          windowEndTs: opts.windowEndTs,
-          allowedCategories: allowed,
-          allowedSubcategoriesByCategory: allowedSubs
-        })
-        if (parsed.cards.length === 0) throw new Error('Local text model returned no valid cards')
-        const cards = validateLocalGeneratedCards(parsed.cards, LOCAL_CARD_LIMIT)
-        cardCount = cards.length
-        cardCoverageSeconds = intervalCoverageSeconds(cards, opts.windowStartTs, opts.windowEndTs)
-        cardCoverageRatio = coverageRatio(cardCoverageSeconds, opts.windowStartTs, opts.windowEndTs)
-        await this.recordParse(callGroupId, opts.batchId, cfg.textModel, 'generate_cards_parse', null)
-        return { cards }
+        return { cards: await parseAndRequireCoverage(raw.text, 'generate_cards_parse') }
       } catch (error) {
-        await this.recordParse(callGroupId, opts.batchId, cfg.textModel, 'generate_cards_parse', error)
-        throw error
+        if (!(error instanceof IncompleteLocalCardCoverageError)) throw error
+        const repairRaw = await this.chat({
+          cfg,
+          model: cfg.textModel,
+          operation: 'generate_cards_repair',
+          callGroupId,
+          batchId: opts.batchId,
+          messages: [{
+            role: 'user',
+            content: buildLocalCardRepairPrompt({
+              originalPrompt: prompt,
+              candidateCards,
+              uncoveredIntervals: error.uncoveredIntervals,
+              observations: targetObservations
+            })
+          }],
+          responseJsonSchema: buildCardGenerationResponseSchema(allowed, allowedSubs, LOCAL_CARD_LIMIT)
+        })
+        try {
+          return { cards: await parseAndRequireCoverage(repairRaw.text, 'generate_cards_repair_parse') }
+        } catch (repairError) {
+          if (repairError instanceof IncompleteLocalCardCoverageError) throw repairError
+          throw new IncompleteLocalCardCoverageError(error.uncoveredIntervals)
+        }
       }
     } finally {
       this.logCompletedBatchTiming(opts.batchId, Date.now() - cardStartedAt, {
@@ -937,17 +1010,113 @@ function assertLocalCardResponseOrder(jsonText: string): void {
   }
 }
 
-export function buildLocalCardGenerationPrompt(basePrompt: string): string {
+export function buildLocalCardGenerationPrompt(
+  basePrompt: string,
+  opts?: {
+    targetStartTs: number
+    targetEndTs: number
+    requiredIntervals: CoverageInterval[]
+  }
+): string {
   return [
     basePrompt,
     '',
     'Local task-level card rules:',
+    opts ? `- Target interval: [${opts.targetStartTs}, ${opts.targetEndTs}].` : '',
+    opts ? `- Evidence-backed intervals that must be covered: ${JSON.stringify(opts.requiredIntervals)}.` : '',
+    '- Return cards for the target interval only. Earlier cards are read-only boundary context; do not reproduce them unless the first target activity genuinely continues one, in which case the first card may retain its original start.',
+    '- Every second in the evidence-backed intervals must be covered by exactly one card. Never omit repeated or uncertain activity.',
+    '- When evidence is continuous, make the cards a continuous chain with each card starting where the previous card ends.',
     '- Cards represent overarching user tasks, not individual apps, windows, screenshots, or observations.',
     '- Consolidate repeated wording and brief supporting window switches into the same continuous task.',
     '- Split only for a clear change of intent, sustained unrelated activity, or explicit idle evidence.',
-    '- Prefer the fewest defensible continuous cards; output no more than 12 cards for this window.',
+    '- Prefer the fewest defensible continuous cards. If necessary, merge the most closely related adjacent tasks to stay within 12 cards.',
     '- Keep titles and summaries concise.'
+  ].filter(Boolean).join('\n')
+}
+
+export function buildLocalCardRepairPrompt(opts: {
+  originalPrompt: string
+  candidateCards: CardGenerationCard[]
+  uncoveredIntervals: CoverageInterval[]
+  observations: Array<{ startTs: number; endTs: number; observation: string }>
+}): string {
+  const relevantObservations = opts.observations.filter((observation) =>
+    opts.uncoveredIntervals.some(
+      (interval) => observation.startTs < interval.endTs && observation.endTs > interval.startTs
+    )
+  )
+  return [
+    opts.originalPrompt,
+    '',
+    'Correction required:',
+    `The previous target cards were: ${JSON.stringify(opts.candidateCards)}.`,
+    `They left these evidence-backed intervals uncovered: ${JSON.stringify(opts.uncoveredIntervals)}.`,
+    `Observations intersecting those intervals: ${JSON.stringify(relevantObservations)}.`,
+    'Return a complete replacement cards array for the entire target interval, not only cards for the gaps.',
+    'Cover every evidence-backed second, keep cards chronological and non-overlapping, and use no more than 12 cards.'
   ].join('\n')
+}
+
+export function mergeCoverageIntervals(
+  intervals: Array<{ startTs: number; endTs: number }>,
+  rangeStartTs: number,
+  rangeEndTs: number
+): CoverageInterval[] {
+  const sorted = intervals
+    .map((interval) => ({
+      startTs: Math.max(rangeStartTs, interval.startTs),
+      endTs: Math.min(rangeEndTs, interval.endTs)
+    }))
+    .filter((interval) => interval.endTs > interval.startTs)
+    .sort((a, b) => a.startTs - b.startTs || a.endTs - b.endTs)
+  const merged: CoverageInterval[] = []
+  for (const interval of sorted) {
+    const previous = merged.at(-1)
+    if (!previous || interval.startTs > previous.endTs) {
+      merged.push({ ...interval })
+      continue
+    }
+    previous.endTs = Math.max(previous.endTs, interval.endTs)
+  }
+  return merged
+}
+
+export function findUncoveredEvidenceIntervals(
+  requiredIntervals: CoverageInterval[],
+  cards: Array<{ startTs: number; endTs: number }>,
+  rangeStartTs: number,
+  rangeEndTs: number
+): CoverageInterval[] {
+  const required = mergeCoverageIntervals(requiredIntervals, rangeStartTs, rangeEndTs)
+  const covered = mergeCoverageIntervals(cards, rangeStartTs, rangeEndTs)
+  const uncovered: CoverageInterval[] = []
+  for (const requiredInterval of required) {
+    let cursor = requiredInterval.startTs
+    for (const coveredInterval of covered) {
+      if (coveredInterval.endTs <= cursor) continue
+      if (coveredInterval.startTs >= requiredInterval.endTs) break
+      if (coveredInterval.startTs > cursor) {
+        uncovered.push({
+          startTs: cursor,
+          endTs: Math.min(coveredInterval.startTs, requiredInterval.endTs)
+        })
+      }
+      cursor = Math.max(cursor, coveredInterval.endTs)
+      if (cursor >= requiredInterval.endTs) break
+    }
+    if (cursor < requiredInterval.endTs) {
+      uncovered.push({ startTs: cursor, endTs: requiredInterval.endTs })
+    }
+  }
+  return uncovered.filter((interval) => interval.endTs > interval.startTs)
+}
+
+function sumIntervalSeconds(intervals: CoverageInterval[]): number {
+  return intervals.reduce(
+    (total, interval) => total + Math.max(0, interval.endTs - interval.startTs),
+    0
+  )
 }
 
 function clipContextOnlyFrame(

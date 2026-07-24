@@ -194,6 +194,8 @@ export class GeminiService {
     batchId: number
     windowStartTs: number
     windowEndTs: number
+    targetStartTs?: number
+    targetEndTs?: number
     observations: Array<{ startTs: number; endTs: number; observation: string }>
     contextCards: Array<{
       startTs: number
