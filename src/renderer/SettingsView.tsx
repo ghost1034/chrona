@@ -7,6 +7,7 @@ import type { LocalSetupResult } from '../shared/ipc'
 import { SyncSettings } from './SyncSettings'
 import { BlurSettings } from './BlurSettings'
 import { LocalAISetup } from './LocalAISetup'
+import { UpdateSettings } from './UpdateUI'
 
 const GEMINI_MODELS = [
   'gemini-3.5-flash',
@@ -299,6 +300,7 @@ export function SettingsView(props: {
               <div className="sideMeta">Review privacy, capture permission, and your optional AI provider.</div>
               <div className="row"><button className="btn" onClick={props.onRunSetup}>Run setup again</button></div>
             </div>
+            <UpdateSettings />
           </div>
         ) : null}
 

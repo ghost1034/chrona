@@ -17,6 +17,9 @@ contextBridge.exposeInMainWorld('chrona', {
   openGeminiKeyPage: () => invoke('app:openGeminiKeyPage', undefined),
   openMacScreenRecordingSettings: () => invoke('app:openMacScreenRecordingSettings', undefined),
   relaunch: () => invoke('app:relaunch', undefined),
+  getUpdateState: () => invoke('app:getUpdateState', undefined),
+  checkForUpdates: () => invoke('app:checkForUpdates', undefined),
+  installUpdate: () => invoke('app:installUpdate', undefined),
   getSetupStatus: () => invoke('setup:getStatus', undefined),
   getSettings: () => invoke('settings:getAll', undefined),
   updateSettings: (patch: IpcContract['settings:update']['req']) =>
@@ -176,6 +179,12 @@ contextBridge.exposeInMainWorld('chrona', {
     return () => ipcRenderer.removeListener(IPC_EVENTS.blurRegionsChanged, listener)
   },
 
+  onUpdateStateChanged: (cb: (state: IpcContract['app:getUpdateState']['res']) => void) => {
+    const listener = (_event: unknown, state: IpcContract['app:getUpdateState']['res']) => cb(state)
+    ipcRenderer.on(IPC_EVENTS.updateStateChanged, listener)
+    return () => ipcRenderer.removeListener(IPC_EVENTS.updateStateChanged, listener)
+  },
+
   onNavigate: (cb: (payload: NavigationEventPayload) => void) => {
     const listener = (_event: unknown, payload: NavigationEventPayload) => cb(payload)
     ipcRenderer.on(IPC_EVENTS.navigate, listener)
@@ -192,6 +201,9 @@ export type ChronaApi = {
   openGeminiKeyPage: () => InvokeResult<'app:openGeminiKeyPage'>
   openMacScreenRecordingSettings: () => InvokeResult<'app:openMacScreenRecordingSettings'>
   relaunch: () => InvokeResult<'app:relaunch'>
+  getUpdateState: () => InvokeResult<'app:getUpdateState'>
+  checkForUpdates: () => InvokeResult<'app:checkForUpdates'>
+  installUpdate: () => InvokeResult<'app:installUpdate'>
   getSetupStatus: () => InvokeResult<'setup:getStatus'>
   getSettings: () => InvokeResult<'settings:getAll'>
   updateSettings: (patch: IpcContract['settings:update']['req']) =>
@@ -315,6 +327,10 @@ export type ChronaApi = {
   onSyncStatusChanged: (cb: (status: IpcContract['sync:getStatus']['res']) => void) => () => void
 
   onBlurRegionsChanged: (cb: () => void) => () => void
+
+  onUpdateStateChanged: (
+    cb: (state: IpcContract['app:getUpdateState']['res']) => void
+  ) => () => void
 
   onNavigate: (cb: (payload: NavigationEventPayload) => void) => () => void
 }

@@ -69,6 +69,7 @@ export function createChronaFixture(scenario: FixtureScenario): ChronaApi {
     getSettings: async () => ({ themePreference: 'system', aiProvider: 'gemini', localBaseUrl: 'http://127.0.0.1:11434/v1', localVisionModel: '', localTextModel: '', categories, subcategories: [], timelapsesEnabled: true, timelapseFps: 2, timelinePxPerHour: 120, onboardingCompleted: true }),
     getCategoryLibrary: async () => ({ categories, subcategories: [] }),
     getAutoStartEnabled: async () => ({ enabled: true }),
+    getUpdateState: async () => ({ supported: false, status: 'disabled', currentVersion: '0.0.0', availableVersion: null, downloadPercent: null, message: 'Updates are only available in an installed build.', checkedAt: null }),
     getStorageUsage: async () => ({ recordingsBytes: 2_400_000_000, timelapsesBytes: 780_000_000, recordingsLimitBytes: 10_737_418_240, timelapsesLimitBytes: 10_737_418_240 }),
     getTimelineDay: async (dayKey: string) => ({ dayKey, cards: dayKey === today ? cards : [] }),
     searchTimeline: async (request: any) => {
@@ -99,6 +100,7 @@ export function createChronaFixture(scenario: FixtureScenario): ChronaApi {
     onStorageUsageUpdated: noopSubscription,
     onSyncStatusChanged: noopSubscription,
     onBlurRegionsChanged: noopSubscription,
+    onUpdateStateChanged: noopSubscription,
     onNavigate: noopSubscription
   }
 

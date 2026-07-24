@@ -3,6 +3,8 @@ export type AppPingResponse = {
   nowTs: number
 }
 
+export type { UpdateState, UpdateStatus } from './update'
+
 export type Settings = {
   version: 12
   themePreference: 'system' | 'light' | 'dark'
@@ -147,6 +149,21 @@ export type IpcContract = {
   'app:relaunch': {
     req: void
     res: { ok: true }
+  }
+
+  'app:getUpdateState': {
+    req: void
+    res: import('./update').UpdateState
+  }
+
+  'app:checkForUpdates': {
+    req: void
+    res: import('./update').UpdateState
+  }
+
+  'app:installUpdate': {
+    req: void
+    res: { ok: boolean }
   }
 
   'setup:getStatus': {
@@ -484,6 +501,9 @@ export const IPC_CHANNELS = {
   appOpenGeminiKeyPage: 'app:openGeminiKeyPage',
   appOpenMacScreenRecordingSettings: 'app:openMacScreenRecordingSettings',
   appRelaunch: 'app:relaunch',
+  appGetUpdateState: 'app:getUpdateState',
+  appCheckForUpdates: 'app:checkForUpdates',
+  appInstallUpdate: 'app:installUpdate',
   setupGetStatus: 'setup:getStatus',
   settingsGetAll: 'settings:getAll',
   settingsUpdate: 'settings:update',
@@ -556,6 +576,7 @@ export const IPC_EVENTS = {
   storageUsageUpdated: 'event:storageUsageUpdated',
   syncStatusChanged: 'event:syncStatusChanged',
   blurRegionsChanged: 'event:blurRegionsChanged',
+  updateStateChanged: 'event:updateStateChanged',
   navigate: 'event:navigate'
 } as const
 

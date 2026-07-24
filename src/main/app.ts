@@ -20,6 +20,7 @@ import { JournalService } from './journal/journal'
 import { CategoriesService } from './categories/categories'
 import { SyncService } from './sync/sync'
 import { BlurService } from './blur/blur'
+import { UpdaterService } from './updater'
 
 let quitting = false
 let mainWindow: BrowserWindow | null = null
@@ -233,9 +234,38 @@ async function main() {
   const journal = new JournalService({ storage, log, settings })
   const categories = new CategoriesService({ settings, storage })
 
-  registerIpc({ settings, capture, storage, analysis, retention, ask, dashboard, journal, categories, sync, blur, log })
+  const updater = new UpdaterService({
+    isPackaged: app.isPackaged,
+    currentVersion: app.getVersion(),
+    log,
+    events: {
+      updateStateChanged: (state) => {
+        if (!win.isDestroyed()) win.webContents.send(IPC_EVENTS.updateStateChanged, state)
+      }
+    },
+    onBeforeInstall: () => {
+      quitting = true
+    }
+  })
+
+  registerIpc({
+    settings,
+    capture,
+    storage,
+    analysis,
+    retention,
+    ask,
+    dashboard,
+    journal,
+    categories,
+    sync,
+    blur,
+    updater,
+    log
+  })
 
   await loadMainWindow(win)
+  updater.start()
 
   win.webContents.on('render-process-gone', (_event, details) => {
     log.error('renderer.gone', { reason: details.reason, exitCode: details.exitCode })

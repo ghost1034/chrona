@@ -34,6 +34,7 @@ import { buildTimelineXlsxBuffer } from './export/timelineXlsx'
 import type { CategoriesService } from './categories/categories'
 import type { SyncService } from './sync/sync'
 import type { BlurService } from './blur/blur'
+import type { UpdaterService } from './updater'
 
 type Handler<K extends keyof IpcContract> = (
   req: IpcContract[K]['req']
@@ -51,6 +52,7 @@ export function registerIpc(opts: {
   categories: CategoriesService
   sync: SyncService
   blur: BlurService
+  updater: UpdaterService
   log: Logger
 }) {
   const ai = new AIService({ storage: opts.storage, log: opts.log, settings: opts.settings })
@@ -106,6 +108,12 @@ export function registerIpc(opts: {
     app.exit(0)
     return { ok: true }
   })
+
+  handle('app:getUpdateState', async () => opts.updater.getState())
+
+  handle('app:checkForUpdates', async () => opts.updater.checkNow())
+
+  handle('app:installUpdate', async () => ({ ok: opts.updater.installDownloadedUpdate() }))
 
   handle('setup:getStatus', async () => {
     const k = await getGeminiApiKey()

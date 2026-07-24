@@ -15,7 +15,7 @@ export default defineConfig([
     // package. Bundling it also rewrites import.meta.url in sharp's ESM entry
     // point to undefined in this CommonJS output, which crashes Electron before
     // app startup. Keep the runtime package intact instead.
-    external: ['electron', 'exceljs', 'sharp']
+    external: ['electron', 'electron-updater', 'exceljs', 'sharp']
   },
   {
     entry: ['src/tools/db-smoke.ts'],

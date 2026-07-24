@@ -25,6 +25,7 @@ jobs:
               release/*.dmg
               release/*.zip
               release/*.blockmap
+              release/latest-mac.yml
           - os: windows-latest
             target: win
             dist_cmd: npm run dist:win
@@ -32,6 +33,7 @@ jobs:
               release/*.exe
               release/*.zip
               release/*.blockmap
+              release/latest.yml
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -45,9 +47,16 @@ jobs:
       - name: Install deps
         run: npm install --include=optional --no-audit --no-fund
 
+      - name: Set release version
+        run: npm version --no-git-tag-version "0.1.${{ github.run_number }}"
+
       - name: Build + package
         run: ${{ matrix.dist_cmd }}
         env:
+          # A Developer ID Application certificate is required for macOS auto-update.
+          # Contributor builds remain unsigned when these repository secrets are absent.
+          CSC_LINK: ${{ matrix.target == 'mac' && secrets.MAC_CSC_LINK || '' }}
+          CSC_KEY_PASSWORD: ${{ matrix.target == 'mac' && secrets.MAC_CSC_KEY_PASSWORD || '' }}
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
 
       - name: Upload packaged artifacts

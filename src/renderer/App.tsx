@@ -16,6 +16,7 @@ import type { LocalSetupResult, SetupStatus } from '../shared/ipc'
 import type { CategoryDefinition, SubcategoryDefinition } from '../shared/categories'
 import { DashboardView } from './DashboardView'
 import { SettingsView } from './SettingsView'
+import { UpdateNotice } from './UpdateUI'
 import { OnboardingView } from './OnboardingView'
 import { Markdown } from './Markdown'
 import { TodayView } from './TodayView'
@@ -1495,6 +1496,8 @@ export function App() {
             {view === 'settings' ? <button className="btn" onClick={() => setView('onboarding')}>Run setup again</button> : null}
           </div>
         </header>
+
+      <UpdateNotice />
 
       {exportDialogOpen && view !== 'journal' ? (
         <div

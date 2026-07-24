@@ -33,6 +33,7 @@
     "@radix-ui/react-tabs": "^1.1.18",
     "@radix-ui/react-tooltip": "^1.2.13",
     "better-sqlite3": "^11.10.0",
+    "electron-updater": "^6.8.9",
     "exceljs": "^4.4.0",
     "ffmpeg-static": "^5.2.0",
     "keytar": "^7.9.0",
@@ -71,6 +72,13 @@
     "directories": {
       "output": "release"
     },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "ghost1034",
+        "repo": "chrona"
+      }
+    ],
     "files": [
       "dist/**/*",
       "node_modules/**/*",
