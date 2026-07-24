@@ -11,7 +11,11 @@ export default defineConfig([
     clean: true,
     dts: false,
     splitting: false,
-    external: ['electron', 'exceljs']
+    // sharp resolves its platform-specific native binary relative to its own
+    // package. Bundling it also rewrites import.meta.url in sharp's ESM entry
+    // point to undefined in this CommonJS output, which crashes Electron before
+    // app startup. Keep the runtime package intact instead.
+    external: ['electron', 'exceljs', 'sharp']
   },
   {
     entry: ['src/tools/db-smoke.ts'],
