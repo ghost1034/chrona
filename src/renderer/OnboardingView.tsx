@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import type { SetupStatus } from '../shared/ipc'
 
-type StepId = 'privacy' | 'capture' | 'gemini' | 'ready'
+type StepId = 'privacy' | 'capture' | 'ai' | 'ready'
 
 export function OnboardingView(props: {
   setupStatus: SetupStatus | null
@@ -13,7 +13,7 @@ export function OnboardingView(props: {
 }) {
   const isMac = props.setupStatus?.platform === 'darwin'
 
-  const steps = useMemo<StepId[]>(() => ['privacy', 'capture', 'gemini', 'ready'], [])
+  const steps = useMemo<StepId[]>(() => ['privacy', 'capture', 'ai', 'ready'], [])
 
   const [stepIndex, setStepIndex] = useState<number>(0)
   const step = steps[Math.max(0, Math.min(steps.length - 1, stepIndex))]!
@@ -22,9 +22,22 @@ export function OnboardingView(props: {
   const [keyLine, setKeyLine] = useState<string>('')
   const [keyTestLine, setKeyTestLine] = useState<string>('')
   const [busy, setBusy] = useState<boolean>(false)
+  const [provider, setProvider] = useState<'gemini' | 'local'>(props.setupStatus?.aiProvider ?? 'gemini')
+  const [localBaseUrl, setLocalBaseUrl] = useState('http://127.0.0.1:11434/v1')
+  const [localVisionModel, setLocalVisionModel] = useState('')
+  const [localTextModel, setLocalTextModel] = useState('')
+  const [localToken, setLocalToken] = useState('')
+  const [localModels, setLocalModels] = useState<string[]>([])
+  const [localLine, setLocalLine] = useState('')
 
   useEffect(() => {
     void props.onRefreshSetupStatus()
+    void window.chrona.getSettings().then((settings) => {
+      setProvider(settings.aiProvider)
+      setLocalBaseUrl(settings.localBaseUrl)
+      setLocalVisionModel(settings.localVisionModel)
+      setLocalTextModel(settings.localTextModel)
+    })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
@@ -80,6 +93,47 @@ export function OnboardingView(props: {
     }
   }
 
+  async function onSelectProvider(next: 'gemini' | 'local') {
+    setProvider(next)
+    await window.chrona.updateSettings({ aiProvider: next })
+    await props.onRefreshSetupStatus()
+  }
+
+  async function onDiscoverLocal() {
+    setBusy(true)
+    setLocalLine('Discovering…')
+    try {
+      const result = await window.chrona.discoverLocalModels(localBaseUrl, localToken || null)
+      setLocalModels(result.models.map((model) => model.id))
+      setLocalLine(`Found ${result.models.length} model${result.models.length === 1 ? '' : 's'}`)
+    } catch (error) {
+      setLocalLine(`Discovery failed: ${error instanceof Error ? error.message : String(error)}`)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function onSaveLocal() {
+    setBusy(true)
+    setLocalLine('Saving…')
+    try {
+      await window.chrona.updateSettings({
+        aiProvider: 'local',
+        localBaseUrl,
+        localVisionModel: localVisionModel.trim(),
+        localTextModel: localTextModel.trim()
+      })
+      if (localToken.trim()) await window.chrona.setLocalBearerToken(localToken)
+      setLocalToken('')
+      setLocalLine('Saved')
+      await props.onRefreshSetupStatus()
+    } catch (error) {
+      setLocalLine(`Save failed: ${error instanceof Error ? error.message : String(error)}`)
+    } finally {
+      setBusy(false)
+    }
+  }
+
   return (
     <div className="onboardingWrap">
       <div className="onboardingCard">
@@ -113,15 +167,25 @@ export function OnboardingView(props: {
               </div>
               <div className="onboardingPromise">
                 <span aria-hidden="true">✓</span>
-                <div><strong>AI is optional</strong><small>Add your own Gemini key for summaries, Ask, and journal drafts.</small></div>
+                <div><strong>AI is optional</strong><small>Use Gemini or a local Ollama / LM Studio server for summaries, Ask, and journal drafts.</small></div>
               </div>
             </div>
           </div>
         ) : null}
 
-        {step === 'gemini' ? (
+        {step === 'ai' ? (
           <div className="onboardingBody">
-            <div className="sideTitle">Gemini API key</div>
+            <div className="sideTitle">AI provider</div>
+            <label className="label" style={{ marginTop: 10 }}>
+              Provider
+              <select className="input" value={provider}
+                onChange={(event) => void onSelectProvider(event.target.value as 'gemini' | 'local')}>
+                <option value="gemini">Gemini</option>
+                <option value="local">Local (Ollama / LM Studio)</option>
+              </select>
+            </label>
+
+            {provider === 'gemini' ? <>
             <div className="sideMeta">
               Status: {hasGeminiKey ? 'configured' : 'missing'}. The key is stored in your OS credential store.
             </div>
@@ -163,6 +227,31 @@ export function OnboardingView(props: {
             <div className="sideMeta" style={{ marginTop: 12 }}>
               You can record without a key, but analysis will stay pending until one is configured.
             </div>
+            </> : <>
+              <div className="sideMeta" style={{ marginTop: 10 }}>
+                Local mode keeps screenshots and all AI operations on this computer. Start Ollama or LM Studio first.
+              </div>
+              <div className="row" style={{ marginTop: 10 }}>
+                <input className="input" value={localBaseUrl} onChange={(event) => setLocalBaseUrl(event.target.value)}
+                  placeholder="http://127.0.0.1:11434/v1" />
+                <button className="btn" disabled={busy} onClick={() => void onDiscoverLocal()}>Refresh models</button>
+              </div>
+              <datalist id="onboarding-local-models">
+                {localModels.map((model) => <option key={model} value={model} />)}
+              </datalist>
+              <div className="row" style={{ marginTop: 10 }}>
+                <input className="input" list="onboarding-local-models" value={localVisionModel}
+                  onChange={(event) => setLocalVisionModel(event.target.value)} placeholder="Vision model ID" />
+                <input className="input" list="onboarding-local-models" value={localTextModel}
+                  onChange={(event) => setLocalTextModel(event.target.value)} placeholder="Text model ID" />
+              </div>
+              <div className="row" style={{ marginTop: 10 }}>
+                <input className="input" type="password" value={localToken}
+                  onChange={(event) => setLocalToken(event.target.value)} placeholder="Optional Bearer token" />
+                <button className="btn btn-accent" disabled={busy} onClick={() => void onSaveLocal()}>Save</button>
+              </div>
+              {localLine ? <div className="mono" style={{ marginTop: 10 }}>{localLine}</div> : null}
+            </>}
           </div>
         ) : null}
 
@@ -207,8 +296,12 @@ export function OnboardingView(props: {
             <div className="sideTitle">Ready</div>
             <div className="onboardingList">
               <div className="row">
-                <div className="pill">Gemini</div>
-                <div className="sideMeta">{hasGeminiKey ? 'Configured' : 'Missing (analysis paused)'}</div>
+                <div className="pill">AI</div>
+                <div className="sideMeta">
+                  {props.setupStatus?.aiConfigured
+                    ? `${props.setupStatus.aiProvider === 'local' ? 'Local' : 'Gemini'} configured`
+                    : 'Missing configuration (analysis paused)'}
+                </div>
               </div>
               {isMac ? (
                 <div className="row">

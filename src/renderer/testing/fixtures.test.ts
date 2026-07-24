@@ -11,6 +11,7 @@ describe('renderer IPC fixtures', () => {
     expect(setup.platform).toBe('darwin')
     if (scenario === 'permission-denied') expect(setup.captureAccess.status).toBe('denied')
     if (scenario === 'ai-missing') expect(setup.hasGeminiKey).toBe(false)
+    if (scenario === 'ai-missing') expect(setup.aiConfigured).toBe(false)
     if (scenario === 'paused') expect(capture.isSystemPaused).toBe(true)
     if (scenario === 'error') expect(capture.lastError).toMatch(/permission/i)
   })

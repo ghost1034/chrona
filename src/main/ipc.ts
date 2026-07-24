@@ -6,7 +6,8 @@ import type { StorageService } from './storage/storage'
 import { app, shell } from 'electron'
 import type { AnalysisService } from './analysis/analysis'
 import { getGeminiApiKey, setGeminiApiKey } from './gemini/keychain'
-import { GeminiService } from './gemini/gemini'
+import { AIService } from './ai/ai'
+import { clearLocalBearerToken, getLocalBearerToken, setLocalBearerToken } from './ai/localKeychain'
 import { clipboard, dialog } from 'electron'
 import {
   formatDayForClipboard,
@@ -52,7 +53,7 @@ export function registerIpc(opts: {
   blur: BlurService
   log: Logger
 }) {
-  const gemini = new GeminiService({ storage: opts.storage, log: opts.log, settings: opts.settings })
+  const ai = new AIService({ storage: opts.storage, log: opts.log, settings: opts.settings })
 
   handle('app:ping', async () => ({ ok: true, nowTs: Math.floor(Date.now() / 1000) }))
 
@@ -108,6 +109,8 @@ export function registerIpc(opts: {
 
   handle('setup:getStatus', async () => {
     const k = await getGeminiApiKey()
+    const localToken = await getLocalBearerToken()
+    const providerStatus = await ai.getProviderStatus()
     const captureAccess =
       process.platform === 'darwin'
         ? await opts.capture.probeAccess()
@@ -115,6 +118,9 @@ export function registerIpc(opts: {
     return {
       platform: process.platform,
       hasGeminiKey: !!k,
+      hasLocalToken: !!localToken,
+      aiProvider: providerStatus.provider,
+      aiConfigured: providerStatus.configured,
       captureAccess
     }
   })
@@ -129,6 +135,15 @@ export function registerIpc(opts: {
 
     if (patch && Object.prototype.hasOwnProperty.call(patch, 'syncIntervalSeconds')) {
       opts.sync.rescheduleFromSettings()
+    }
+
+    if (
+      patch &&
+      ['aiProvider', 'localBaseUrl', 'localVisionModel', 'localTextModel'].some((key) =>
+        Object.prototype.hasOwnProperty.call(patch, key)
+      )
+    ) {
+      opts.analysis.retryPendingFromSettings()
     }
 
     return next
@@ -196,6 +211,7 @@ export function registerIpc(opts: {
 
   handle('gemini:setApiKey', async (req) => {
     await setGeminiApiKey(req.apiKey)
+    opts.analysis.retryPendingFromSettings()
     return { ok: true }
   })
   handle('gemini:hasApiKey', async () => {
@@ -204,9 +220,25 @@ export function registerIpc(opts: {
   })
 
   handle('gemini:testApiKey', async (req) => {
-    const res = await gemini.testApiKey({ apiKeyOverride: req.apiKey ?? null })
+    const res = await ai.gemini.testApiKey({ apiKeyOverride: req.apiKey ?? null })
     return res
   })
+
+  handle('ai:getProviderStatus', async () => ai.getProviderStatus())
+  handle('local:setToken', async (req) => {
+    await setLocalBearerToken(req.token)
+    opts.analysis.retryPendingFromSettings()
+    return { ok: true }
+  })
+  handle('local:clearToken', async () => {
+    await clearLocalBearerToken()
+    opts.analysis.retryPendingFromSettings()
+    return { ok: true }
+  })
+  handle('local:discoverModels', async (req) => ({
+    models: await ai.local.discoverModels({ baseUrl: req.baseUrl, token: req.token })
+  }))
+  handle('local:testConnection', async (req) => ai.local.testConnection(req))
 
   handle('timeline:getDay', async (req) => {
     const cards = await opts.storage.fetchCardsForDay(req.dayKey)
@@ -400,8 +432,8 @@ export function registerIpc(opts: {
     return { ok: true }
   })
 
-  handle('journal:draftWithGemini', async (req) => {
-    const draft = await opts.journal.draftWithGemini({ dayKey: req.dayKey, options: req.options })
+  handle('journal:draftWithAI', async (req) => {
+    const draft = await opts.journal.draftWithAI({ dayKey: req.dayKey, options: req.options })
     return { draft }
   })
 

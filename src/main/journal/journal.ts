@@ -1,7 +1,7 @@
 import type { JournalDraftDTO } from '../../shared/journal'
 import { dayWindowForDayKey } from '../../shared/time'
 import type { Logger } from '../logger'
-import { GeminiService } from '../gemini/gemini'
+import { AIService } from '../ai/ai'
 import type { StorageService } from '../storage/storage'
 import type { ReviewRating } from '../storage/storage'
 import type { SettingsStore } from '../settings'
@@ -10,17 +10,17 @@ import { buildJournalDraftSchema } from '../gemini/schemas'
 export class JournalService {
   private readonly storage: StorageService
   private readonly log: Logger
-  private readonly gemini: GeminiService
+  private readonly ai: AIService
   private readonly settings: SettingsStore
 
   constructor(opts: { storage: StorageService; log: Logger; settings: SettingsStore }) {
     this.storage = opts.storage
     this.log = opts.log
     this.settings = opts.settings
-    this.gemini = new GeminiService({ storage: opts.storage, log: opts.log, settings: opts.settings })
+    this.ai = new AIService({ storage: opts.storage, log: opts.log, settings: opts.settings })
   }
 
-  async draftWithGemini(opts: {
+  async draftWithAI(opts: {
     dayKey: string
     options?: {
       includeObservations?: boolean
@@ -95,7 +95,7 @@ export class JournalService {
       preamble: settings.promptPreambleJournalDraft
     })
 
-    const rawText = await this.gemini.generateJsonOnly({
+    const generation = await this.ai.generateJsonOnly({
       operation: 'journal_draft',
       callGroupId,
       prompt,
@@ -111,13 +111,13 @@ export class JournalService {
 
     let parsed: JournalDraftDTO
     try {
-      parsed = parseDraftJson({ jsonText: rawText })
+      parsed = parseDraftJson({ jsonText: generation.text })
       await this.storage.insertLLMCall({
         batchId: null,
         callGroupId,
         attempt: 1,
-        provider: 'gemini',
-        model: null,
+        provider: generation.provider,
+        model: generation.model,
         operation: 'journal_draft_parse',
         status: 'success',
         requestMethod: null,
@@ -130,8 +130,8 @@ export class JournalService {
         batchId: null,
         callGroupId,
         attempt: 1,
-        provider: 'gemini',
-        model: null,
+        provider: generation.provider,
+        model: generation.model,
         operation: 'journal_draft_parse',
         status: 'failure',
         errorDomain: 'parse',

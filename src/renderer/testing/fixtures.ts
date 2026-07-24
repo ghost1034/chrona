@@ -65,8 +65,8 @@ export function createChronaFixture(scenario: FixtureScenario): ChronaApi {
       lastError: captureError
     }),
     listDisplays: async () => [{ id: 'display-1', bounds: { x: 0, y: 0, width: 1728, height: 1117 }, scaleFactor: 2 }],
-    getSetupStatus: async () => ({ platform: 'darwin', hasGeminiKey: hasKey, captureAccess: { status: denied ? 'denied' : 'granted', message: denied ? 'Screen Recording access is required.' : null } }),
-    getSettings: async () => ({ themePreference: 'system', categories, subcategories: [], timelapsesEnabled: true, timelapseFps: 2, timelinePxPerHour: 120, onboardingCompleted: true }),
+    getSetupStatus: async () => ({ platform: 'darwin', hasGeminiKey: hasKey, hasLocalToken: false, aiProvider: 'gemini', aiConfigured: hasKey, captureAccess: { status: denied ? 'denied' : 'granted', message: denied ? 'Screen Recording access is required.' : null } }),
+    getSettings: async () => ({ themePreference: 'system', aiProvider: 'gemini', localBaseUrl: 'http://127.0.0.1:11434/v1', localVisionModel: '', localTextModel: '', categories, subcategories: [], timelapsesEnabled: true, timelapseFps: 2, timelinePxPerHour: 120, onboardingCompleted: true }),
     getCategoryLibrary: async () => ({ categories, subcategories: [] }),
     getAutoStartEnabled: async () => ({ enabled: true }),
     getStorageUsage: async () => ({ recordingsBytes: 2_400_000_000, timelapsesBytes: 780_000_000, recordingsLimitBytes: 10_737_418_240, timelapsesLimitBytes: 10_737_418_240 }),
