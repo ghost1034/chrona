@@ -80,6 +80,19 @@ export type SetupStatus = {
 
 export type LocalModelInfo = { id: string }
 
+export type LocalRuntime = 'ollama' | 'lm_studio' | 'compatible'
+
+export type LocalSetupResult = {
+  status: 'ready' | 'needs_models' | 'needs_vision_model' | 'unavailable'
+  runtime: LocalRuntime | null
+  baseUrl: string | null
+  models: LocalModelInfo[]
+  visionModel: string | null
+  textModel: string | null
+  message: string
+  recommendedCommand: string | null
+}
+
 export type AIProviderStatus = {
   provider: 'gemini' | 'local'
   configured: boolean
@@ -265,6 +278,14 @@ export type IpcContract = {
   'local:discoverModels': {
     req: { baseUrl?: string | null; token?: string | null }
     res: { models: LocalModelInfo[] }
+  }
+  'local:autoConfigure': {
+    req: void
+    res: LocalSetupResult
+  }
+  'local:openSetupGuide': {
+    req: { runtime: 'ollama' | 'lm_studio' }
+    res: { ok: true }
   }
   'local:testConnection': {
     req: {
@@ -490,6 +511,8 @@ export const IPC_CHANNELS = {
   localSetToken: 'local:setToken',
   localClearToken: 'local:clearToken',
   localDiscoverModels: 'local:discoverModels',
+  localAutoConfigure: 'local:autoConfigure',
+  localOpenSetupGuide: 'local:openSetupGuide',
   localTestConnection: 'local:testConnection',
   timelineGetDay: 'timeline:getDay',
   timelineGetCardObservations: 'timeline:getCardObservations',

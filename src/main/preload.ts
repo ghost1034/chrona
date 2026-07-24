@@ -51,6 +51,9 @@ contextBridge.exposeInMainWorld('chrona', {
   clearLocalBearerToken: () => invoke('local:clearToken', undefined),
   discoverLocalModels: (baseUrl?: string | null, token?: string | null) =>
     invoke('local:discoverModels', { baseUrl, token }),
+  autoConfigureLocalAI: () => invoke('local:autoConfigure', undefined),
+  openLocalAISetupGuide: (runtime: 'ollama' | 'lm_studio') =>
+    invoke('local:openSetupGuide', { runtime }),
   testLocalAI: (req: IpcContract['local:testConnection']['req']) =>
     invoke('local:testConnection', req),
 
@@ -224,6 +227,9 @@ export type ChronaApi = {
   clearLocalBearerToken: () => InvokeResult<'local:clearToken'>
   discoverLocalModels: (baseUrl?: string | null, token?: string | null) =>
     InvokeResult<'local:discoverModels'>
+  autoConfigureLocalAI: () => InvokeResult<'local:autoConfigure'>
+  openLocalAISetupGuide: (runtime: 'ollama' | 'lm_studio') =>
+    InvokeResult<'local:openSetupGuide'>
   testLocalAI: (req: IpcContract['local:testConnection']['req']) =>
     InvokeResult<'local:testConnection'>
 

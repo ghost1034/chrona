@@ -3,8 +3,10 @@ import * as Dialog from '@radix-ui/react-dialog'
 import * as Switch from '@radix-ui/react-switch'
 import { formatBytes } from '../shared/format'
 import type { CategoryDefinition, SubcategoryDefinition } from '../shared/categories'
+import type { LocalSetupResult } from '../shared/ipc'
 import { SyncSettings } from './SyncSettings'
 import { BlurSettings } from './BlurSettings'
+import { LocalAISetup } from './LocalAISetup'
 
 const GEMINI_MODELS = [
   'gemini-3.5-flash',
@@ -113,6 +115,10 @@ export function SettingsView(props: {
   setLocalVisionMaxImagesPerRequest: (n: number) => void
   localModels: string[]
   localAILine: string
+  localSetup: LocalSetupResult | null
+  localSetupBusy: boolean
+  onAutoConfigureLocalAI: () => Promise<void>
+  onOpenLocalAISetupGuide: (runtime: 'ollama' | 'lm_studio') => Promise<void>
   onSaveLocalAI: () => Promise<void>
   onClearLocalToken: () => Promise<void>
   onDiscoverLocalModels: () => Promise<void>
@@ -1124,6 +1130,12 @@ export function SettingsView(props: {
             </div>
             </> : (
               <>
+                <LocalAISetup
+                  result={props.localSetup}
+                  busy={props.localSetupBusy}
+                  onConfigure={props.onAutoConfigureLocalAI}
+                  onOpenGuide={props.onOpenLocalAISetupGuide}
+                />
                 <div className="block">
                   <div className="sideTitle">Local server</div>
                   <div className="sideMeta">

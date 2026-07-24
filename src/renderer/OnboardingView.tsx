@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
-import type { SetupStatus } from '../shared/ipc'
+import type { LocalSetupResult, SetupStatus } from '../shared/ipc'
+import { LocalAISetup } from './LocalAISetup'
 
 type StepId = 'privacy' | 'capture' | 'ai' | 'ready'
 
@@ -29,6 +30,7 @@ export function OnboardingView(props: {
   const [localToken, setLocalToken] = useState('')
   const [localModels, setLocalModels] = useState<string[]>([])
   const [localLine, setLocalLine] = useState('')
+  const [localSetup, setLocalSetup] = useState<LocalSetupResult | null>(null)
 
   useEffect(() => {
     void props.onRefreshSetupStatus()
@@ -37,6 +39,7 @@ export function OnboardingView(props: {
       setLocalBaseUrl(settings.localBaseUrl)
       setLocalVisionModel(settings.localVisionModel)
       setLocalTextModel(settings.localTextModel)
+      if (settings.aiProvider === 'local') void onAutoConfigureLocal()
     })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
@@ -97,6 +100,25 @@ export function OnboardingView(props: {
     setProvider(next)
     await window.chrona.updateSettings({ aiProvider: next })
     await props.onRefreshSetupStatus()
+    if (next === 'local') await onAutoConfigureLocal()
+  }
+
+  async function onAutoConfigureLocal() {
+    setBusy(true)
+    setLocalLine('')
+    try {
+      const result = await window.chrona.autoConfigureLocalAI()
+      setLocalSetup(result)
+      if (result.baseUrl) setLocalBaseUrl(result.baseUrl)
+      if (result.visionModel) setLocalVisionModel(result.visionModel)
+      if (result.textModel) setLocalTextModel(result.textModel)
+      setLocalModels(result.models.map((model) => model.id))
+      await props.onRefreshSetupStatus()
+    } catch (error) {
+      setLocalLine(`Automatic setup failed: ${error instanceof Error ? error.message : String(error)}`)
+    } finally {
+      setBusy(false)
+    }
   }
 
   async function onDiscoverLocal() {
@@ -229,27 +251,36 @@ export function OnboardingView(props: {
             </div>
             </> : <>
               <div className="sideMeta" style={{ marginTop: 10 }}>
-                Local mode keeps screenshots and all AI operations on this computer. Start Ollama or LM Studio first.
+                Local mode keeps screenshots and all AI operations on this computer.
               </div>
-              <div className="row" style={{ marginTop: 10 }}>
-                <input className="input" value={localBaseUrl} onChange={(event) => setLocalBaseUrl(event.target.value)}
-                  placeholder="http://127.0.0.1:11434/v1" />
-                <button className="btn" disabled={busy} onClick={() => void onDiscoverLocal()}>Refresh models</button>
-              </div>
-              <datalist id="onboarding-local-models">
-                {localModels.map((model) => <option key={model} value={model} />)}
-              </datalist>
-              <div className="row" style={{ marginTop: 10 }}>
-                <input className="input" list="onboarding-local-models" value={localVisionModel}
-                  onChange={(event) => setLocalVisionModel(event.target.value)} placeholder="Vision model ID" />
-                <input className="input" list="onboarding-local-models" value={localTextModel}
-                  onChange={(event) => setLocalTextModel(event.target.value)} placeholder="Text model ID" />
-              </div>
-              <div className="row" style={{ marginTop: 10 }}>
-                <input className="input" type="password" value={localToken}
-                  onChange={(event) => setLocalToken(event.target.value)} placeholder="Optional Bearer token" />
-                <button className="btn btn-accent" disabled={busy} onClick={() => void onSaveLocal()}>Save</button>
-              </div>
+              <LocalAISetup
+                result={localSetup}
+                busy={busy}
+                onConfigure={onAutoConfigureLocal}
+                onOpenGuide={async (runtime) => { await window.chrona.openLocalAISetupGuide(runtime) }}
+              />
+              <details className="advancedDetails" style={{ marginTop: 10 }}>
+                <summary>Advanced manual setup</summary>
+                <div className="row" style={{ marginTop: 10 }}>
+                  <input className="input" value={localBaseUrl} onChange={(event) => setLocalBaseUrl(event.target.value)}
+                    placeholder="http://127.0.0.1:11434/v1" />
+                  <button className="btn" disabled={busy} onClick={() => void onDiscoverLocal()}>Refresh models</button>
+                </div>
+                <datalist id="onboarding-local-models">
+                  {localModels.map((model) => <option key={model} value={model} />)}
+                </datalist>
+                <div className="row" style={{ marginTop: 10 }}>
+                  <input className="input" list="onboarding-local-models" value={localVisionModel}
+                    onChange={(event) => setLocalVisionModel(event.target.value)} placeholder="Vision model ID" />
+                  <input className="input" list="onboarding-local-models" value={localTextModel}
+                    onChange={(event) => setLocalTextModel(event.target.value)} placeholder="Text model ID" />
+                </div>
+                <div className="row" style={{ marginTop: 10 }}>
+                  <input className="input" type="password" value={localToken}
+                    onChange={(event) => setLocalToken(event.target.value)} placeholder="Optional Bearer token" />
+                  <button className="btn" disabled={busy} onClick={() => void onSaveLocal()}>Save manual settings</button>
+                </div>
+              </details>
               {localLine ? <div className="mono" style={{ marginTop: 10 }}>{localLine}</div> : null}
             </>}
           </div>

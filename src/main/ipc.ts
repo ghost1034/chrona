@@ -238,6 +238,19 @@ export function registerIpc(opts: {
   handle('local:discoverModels', async (req) => ({
     models: await ai.local.discoverModels({ baseUrl: req.baseUrl, token: req.token })
   }))
+  handle('local:autoConfigure', async () => {
+    const result = await ai.local.autoConfigure()
+    if (result.status === 'ready') opts.analysis.retryPendingFromSettings()
+    return result
+  })
+  handle('local:openSetupGuide', async (req) => {
+    await shell.openExternal(
+      req.runtime === 'ollama'
+        ? 'https://ollama.com/download'
+        : 'https://lmstudio.ai/docs/developer/rest/quickstart'
+    )
+    return { ok: true }
+  })
   handle('local:testConnection', async (req) => ai.local.testConnection(req))
 
   handle('timeline:getDay', async (req) => {

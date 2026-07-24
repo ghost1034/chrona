@@ -12,7 +12,7 @@ import { parseAppSitesFromMetadata } from '../shared/metadata'
 import type { ObservationDTO } from '../shared/observations'
 import type { AskSourceRef } from '../shared/ask'
 import type { JournalDraftDTO, JournalEntryDTO, JournalEntryPatch } from '../shared/journal'
-import type { SetupStatus } from '../shared/ipc'
+import type { LocalSetupResult, SetupStatus } from '../shared/ipc'
 import type { CategoryDefinition, SubcategoryDefinition } from '../shared/categories'
 import { DashboardView } from './DashboardView'
 import { SettingsView } from './SettingsView'
@@ -89,6 +89,8 @@ export function App() {
   const [localVisionMaxImagesPerRequest, setLocalVisionMaxImagesPerRequest] = useState<number>(12)
   const [localModels, setLocalModels] = useState<string[]>([])
   const [localAILine, setLocalAILine] = useState<string>('')
+  const [localSetup, setLocalSetup] = useState<LocalSetupResult | null>(null)
+  const [localSetupBusy, setLocalSetupBusy] = useState<boolean>(false)
 
   const [promptPreambleTranscribe, setPromptPreambleTranscribe] = useState<string>('')
   const [promptPreambleCards, setPromptPreambleCards] = useState<string>('')
@@ -344,6 +346,8 @@ export function App() {
       setOnboardingCompleted(!!(settings as any).onboardingCompleted)
       if (!(settings as any).onboardingCompleted) {
         setView('onboarding')
+      } else if ((settings as any).aiProvider === 'local') {
+        void onAutoConfigureLocalAI()
       }
 
       const usage = await window.chrona.getStorageUsage()
@@ -895,6 +899,29 @@ export function App() {
     setAIProvider(provider)
     await window.chrona.updateSettings({ aiProvider: provider })
     await refreshSetupStatus()
+    if (provider === 'local') await onAutoConfigureLocalAI()
+  }
+
+  async function onAutoConfigureLocalAI() {
+    setLocalSetupBusy(true)
+    setLocalAILine('')
+    try {
+      const result = await window.chrona.autoConfigureLocalAI()
+      setLocalSetup(result)
+      if (result.baseUrl) setLocalBaseUrl(result.baseUrl)
+      setLocalVisionModel(result.visionModel ?? '')
+      setLocalTextModel(result.textModel ?? '')
+      setLocalModels(result.models.map((model) => model.id))
+      await refreshSetupStatus()
+    } catch (error) {
+      setLocalAILine(`Automatic setup failed: ${error instanceof Error ? error.message : String(error)}`)
+    } finally {
+      setLocalSetupBusy(false)
+    }
+  }
+
+  async function onOpenLocalAISetupGuide(runtime: 'ollama' | 'lm_studio') {
+    await window.chrona.openLocalAISetupGuide(runtime)
   }
 
   async function onSaveLocalAI() {
@@ -2131,6 +2158,10 @@ export function App() {
                   setLocalVisionMaxImagesPerRequest={setLocalVisionMaxImagesPerRequest}
                   localModels={localModels}
                   localAILine={localAILine}
+                  localSetup={localSetup}
+                  localSetupBusy={localSetupBusy}
+                  onAutoConfigureLocalAI={onAutoConfigureLocalAI}
+                  onOpenLocalAISetupGuide={onOpenLocalAISetupGuide}
                   onSaveLocalAI={onSaveLocalAI}
                   onClearLocalToken={onClearLocalToken}
                   onDiscoverLocalModels={onDiscoverLocalModels}

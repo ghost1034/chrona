@@ -3,7 +3,7 @@ import os from 'node:os'
 import path from 'node:path'
 import sharp from 'sharp'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { LocalAIService, buildOverlappingChunks, mergeBoundaryObservations } from './local'
+import { LocalAIService, buildOverlappingChunks, mergeBoundaryObservations, selectLocalModels } from './local'
 import { LocalRuntimeUnavailableError } from './errors'
 
 vi.mock('./localKeychain', () => ({ getLocalBearerToken: async () => null }))
@@ -41,9 +41,73 @@ describe('local AI helpers', () => {
       { startTs: 40, endTs: 50, observation: 'Reading', llmModel: 'vision' }
     ])
   })
+
+  it('automatically chooses vision and text models while ignoring embedding models', () => {
+    expect(selectLocalModels([
+      'nomic-embed-text:latest',
+      'qwen3:4b',
+      'qwen3-vl:4b',
+      'llava:7b'
+    ])).toEqual({
+      visionModel: 'qwen3-vl:4b',
+      textModel: 'qwen3:4b'
+    })
+    expect(selectLocalModels(['qwen3-vl:4b'])).toEqual({
+      visionModel: 'qwen3-vl:4b',
+      textModel: 'qwen3-vl:4b'
+    })
+    expect(selectLocalModels(['gemma3:1b'])).toEqual({
+      visionModel: null,
+      textModel: 'gemma3:1b'
+    })
+  })
 })
 
 describe('LocalAIService OpenAI compatibility', () => {
+  it('detects LM Studio on its standard port and saves selected models automatically', async () => {
+    const { service, settingUpdates } = makeService({ localVisionModel: '', localTextModel: '' })
+    vi.stubGlobal('fetch', vi.fn((url: string) => {
+      if (url.startsWith('http://127.0.0.1:1234/')) {
+        return Promise.resolve(new Response(JSON.stringify({
+          data: [{ id: 'qwen/qwen3-vl-4b' }, { id: 'qwen/qwen3-4b' }]
+        })))
+      }
+      return Promise.reject(Object.assign(new Error('fetch failed'), { cause: { code: 'ECONNREFUSED' } }))
+    }))
+
+    await expect(service.autoConfigure()).resolves.toMatchObject({
+      status: 'ready',
+      runtime: 'lm_studio',
+      baseUrl: 'http://127.0.0.1:1234/v1',
+      visionModel: 'qwen/qwen3-vl-4b',
+      textModel: 'qwen/qwen3-4b'
+    })
+    expect(settingUpdates.at(-1)).toMatchObject({
+      aiProvider: 'local',
+      localBaseUrl: 'http://127.0.0.1:1234/v1',
+      localVisionModel: 'qwen/qwen3-vl-4b',
+      localTextModel: 'qwen/qwen3-4b'
+    })
+  })
+
+  it('guides the user when a running local server lacks a vision model', async () => {
+    const { service } = makeService({ localVisionModel: '', localTextModel: '' })
+    vi.stubGlobal('fetch', vi.fn((url: string) => {
+      if (url.startsWith('http://127.0.0.1:11434/')) {
+        return Promise.resolve(new Response(JSON.stringify({ data: [{ id: 'llama3.2:3b' }] })))
+      }
+      return Promise.reject(Object.assign(new Error('fetch failed'), { cause: { code: 'ECONNREFUSED' } }))
+    }))
+
+    await expect(service.autoConfigure()).resolves.toMatchObject({
+      status: 'needs_vision_model',
+      runtime: 'ollama',
+      textModel: 'llama3.2:3b',
+      visionModel: null,
+      recommendedCommand: 'ollama pull qwen3-vl:4b'
+    })
+  })
+
   it('discovers models with optional auth and rejects redirects', async () => {
     const { service } = makeService()
     const fetchMock = vi.fn()
@@ -211,6 +275,7 @@ describe('LocalAIService OpenAI compatibility', () => {
 
 function makeService(settingsOverrides: Record<string, unknown> = {}, storageOverrides: Record<string, unknown> = {}) {
   const calls: any[] = []
+  const settingUpdates: Array<Record<string, unknown>> = []
   const settings = {
     localBaseUrl: 'http://127.0.0.1:11434/v1',
     localVisionModel: 'vision-model',
@@ -235,9 +300,16 @@ function makeService(settingsOverrides: Record<string, unknown> = {}, storageOve
     ...storageOverrides
   }
   const service = new LocalAIService({
-    settings: { getAll: async () => settings } as any,
+    settings: {
+      getAll: async () => settings,
+      update: async (patch: Record<string, unknown>) => {
+        settingUpdates.push(patch)
+        Object.assign(settings, patch)
+        return settings
+      }
+    } as any,
     storage: storage as any,
     log: { warn: vi.fn(), info: vi.fn(), error: vi.fn() } as any
   })
-  return { service, calls, storage }
+  return { service, calls, storage, settingUpdates }
 }

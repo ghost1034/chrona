@@ -8,6 +8,7 @@ import { buildCardGenerationPrompt } from '../gemini/gemini'
 import { buildCardGenerationResponseSchema, type JsonSchema } from '../gemini/schemas'
 import { getLocalBearerToken } from './localKeychain'
 import { LocalRuntimeUnavailableError } from './errors'
+import type { LocalRuntime, LocalSetupResult } from '../../shared/ipc'
 
 type LocalConfig = {
   baseUrl: string
@@ -36,6 +37,116 @@ export class LocalAIService {
     const raw = await this.request({
       cfg,
       token,
+      method: 'GET',
+      path: '/models',
+      operation: 'discover_models',
+      model: null,
+      callGroupId: `local:discover:${Date.now()}`,
+      batchId: null
+    })
+    let parsed: any
+    try {
+      parsed = JSON.parse(raw.text)
+    } catch {
+      throw new Error('Local server returned invalid model-list JSON')
+    }
+    if (!Array.isArray(parsed?.data)) throw new Error('Local server response is missing a data array')
+    return Array.from(
+      new Set<string>(parsed.data.map((item: any) => String(item?.id ?? '').trim()).filter(Boolean))
+    ).sort().map((id) => ({ id }))
+  }
+
+  async autoConfigure(): Promise<LocalSetupResult> {
+    const settings = await this.opts.settings.getAll()
+    const token = await getLocalBearerToken()
+    const candidates = uniqueRuntimeCandidates(settings.localBaseUrl)
+    const probes = await Promise.all(
+      candidates.map(async (candidate) => {
+        try {
+          const cfg = await this.resolveConfig(candidate.baseUrl)
+          const models = await this.discoverModelsWithConfig({
+            cfg: { ...cfg, requestTimeoutMs: Math.min(cfg.requestTimeoutMs, 2_500), maxAttempts: 1 },
+            token
+          })
+          return { ...candidate, models }
+        } catch {
+          return null
+        }
+      })
+    )
+    const available = probes.filter((probe): probe is NonNullable<typeof probe> => !!probe)
+    if (available.length === 0) {
+      return {
+        status: 'unavailable',
+        runtime: null,
+        baseUrl: null,
+        models: [],
+        visionModel: null,
+        textModel: null,
+        message: 'No local AI server was found. Install and open Ollama, or start the local server in LM Studio, then try again.',
+        recommendedCommand: null
+      }
+    }
+
+    const ranked = available.map((probe) => ({
+      ...probe,
+      selection: selectLocalModels(probe.models.map((model) => model.id), {
+        visionModel: settings.localVisionModel,
+        textModel: settings.localTextModel
+      })
+    }))
+    const selected = ranked.find((probe) => probe.selection.visionModel && probe.selection.textModel)
+      ?? ranked.find((probe) => probe.models.length > 0)
+      ?? ranked[0]!
+    const { visionModel, textModel } = selected.selection
+
+    await this.opts.settings.update({
+      aiProvider: 'local',
+      localBaseUrl: selected.baseUrl,
+      localVisionModel: visionModel ?? '',
+      localTextModel: textModel ?? ''
+    })
+
+    if (selected.models.length === 0) {
+      return {
+        status: 'needs_models',
+        runtime: selected.runtime,
+        baseUrl: selected.baseUrl,
+        models: [],
+        visionModel: null,
+        textModel: null,
+        message: `${runtimeName(selected.runtime)} is running, but it has no models available. Download a vision model, then try again.`,
+        recommendedCommand: selected.runtime === 'ollama' ? 'ollama pull qwen3-vl:4b' : null
+      }
+    }
+    if (!visionModel) {
+      return {
+        status: 'needs_vision_model',
+        runtime: selected.runtime,
+        baseUrl: selected.baseUrl,
+        models: selected.models,
+        visionModel: null,
+        textModel,
+        message: `${runtimeName(selected.runtime)} was found and the text model was selected, but Chrona also needs a vision model to understand screenshots.`,
+        recommendedCommand: selected.runtime === 'ollama' ? 'ollama pull qwen3-vl:4b' : null
+      }
+    }
+    return {
+      status: 'ready',
+      runtime: selected.runtime,
+      baseUrl: selected.baseUrl,
+      models: selected.models,
+      visionModel,
+      textModel: textModel!,
+      message: `${runtimeName(selected.runtime)} is ready. Chrona selected ${visionModel === textModel ? visionModel : `${visionModel} for vision and ${textModel} for text`}.`,
+      recommendedCommand: null
+    }
+  }
+
+  private async discoverModelsWithConfig(opts: { cfg: LocalConfig; token: string | null }) {
+    const raw = await this.request({
+      cfg: opts.cfg,
+      token: opts.token,
       method: 'GET',
       path: '/models',
       operation: 'discover_models',
@@ -607,3 +718,75 @@ function clamp(value: number, min: number, max: number, fallback: number) {
 
 const TEST_PIXEL_DATA_URL =
   'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII='
+
+const STANDARD_LOCAL_RUNTIMES: Array<{ runtime: LocalRuntime; baseUrl: string }> = [
+  { runtime: 'ollama', baseUrl: 'http://127.0.0.1:11434/v1' },
+  { runtime: 'lm_studio', baseUrl: 'http://127.0.0.1:1234/v1' }
+]
+
+function uniqueRuntimeCandidates(configuredBaseUrl: string) {
+  const configured = normalizeLoopbackBaseUrl(configuredBaseUrl)
+  const standard = STANDARD_LOCAL_RUNTIMES.find((candidate) => candidate.baseUrl === configured)
+  const candidates: Array<{ runtime: LocalRuntime; baseUrl: string }> = [
+    { runtime: standard?.runtime ?? 'compatible', baseUrl: configured },
+    ...STANDARD_LOCAL_RUNTIMES
+  ]
+  return candidates.filter(
+    (candidate, index) => candidates.findIndex((other) => other.baseUrl === candidate.baseUrl) === index
+  )
+}
+
+export function selectLocalModels(
+  modelIds: string[],
+  existing: { visionModel?: string | null; textModel?: string | null } = {}
+): { visionModel: string | null; textModel: string | null } {
+  const models = Array.from(new Set(modelIds.map((id) => id.trim()).filter(Boolean)))
+  const usableText = models.filter((id) => !isEmbeddingModel(id))
+  const vision = usableText.filter(isVisionModel)
+  const visionModel = chooseModel(vision, existing.visionModel, scoreVisionModel)
+  const textOnly = usableText.filter((id) => !isVisionModel(id))
+  const textPool = textOnly.length > 0 ? textOnly : vision
+  const textModel = chooseModel(textPool, existing.textModel, scoreTextModel)
+  return { visionModel, textModel }
+}
+
+function chooseModel(
+  candidates: string[],
+  existing: string | null | undefined,
+  score: (id: string) => number
+) {
+  const current = existing?.trim()
+  if (current && candidates.includes(current)) return current
+  return [...candidates].sort((a, b) => score(b) - score(a) || a.localeCompare(b))[0] ?? null
+}
+
+function isVisionModel(id: string) {
+  if (/gemma[-_.]?3(?::|[-_.])1b(?:[-_.:]|$)/i.test(id)) return false
+  return /(?:qwen[23](?:\.5)?[-_.]?vl|llava|llama[-_.]?3\.2[-_.]?vision|moondream|minicpm[-_.]?v|gemma[-_.]?3|granite[-_.]?3\.2[-_.]?vision|pixtral|mistral[-_.]?small[-_.]?3\.1)/i.test(id)
+}
+
+function isEmbeddingModel(id: string) {
+  return /(?:embed|embedding|rerank|nomic[-_.]?embed|(?:^|[/_-])bge[-_.])/i.test(id)
+}
+
+function scoreVisionModel(id: string) {
+  if (/qwen3[-_.]?vl/i.test(id)) return 50
+  if (/qwen2\.5[-_.]?vl/i.test(id)) return 45
+  if (/gemma[-_.]?3/i.test(id)) return 40
+  if (/llama[-_.]?3\.2[-_.]?vision/i.test(id)) return 35
+  if (/pixtral|llava/i.test(id)) return 30
+  return 10
+}
+
+function scoreTextModel(id: string) {
+  if (/qwen3/i.test(id)) return 40
+  if (/llama|mistral|gemma/i.test(id)) return 30
+  if (/instruct|chat/i.test(id)) return 20
+  return 10
+}
+
+function runtimeName(runtime: LocalRuntime) {
+  if (runtime === 'ollama') return 'Ollama'
+  if (runtime === 'lm_studio') return 'LM Studio'
+  return 'Local AI server'
+}
