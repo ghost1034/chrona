@@ -11,16 +11,32 @@ const STORYBOARD_HEIGHT = 540
 const PANEL_WIDTH = STORYBOARD_WIDTH / 2
 const PANEL_HEIGHT = STORYBOARD_HEIGHT / 2
 
-/** Selects endpoints, minute anchors, and the strongest adjacent visual changes. */
+export const LOCAL_VISION_MAX_SELECTED_FRAMES = 45
+
+export function calculateLocalVisionFrameBudget(
+  capturedAts: number[],
+  maxFrames = LOCAL_VISION_MAX_SELECTED_FRAMES
+): number {
+  if (capturedAts.length === 0 || maxFrames <= 0) return 0
+  const limit = Math.max(1, Math.floor(maxFrames))
+  if (capturedAts.length === 1 || limit === 1) return 1
+  const anchors = collectAnchorIndexes(capturedAts)
+  const durationSeconds = Math.max(0, capturedAts.at(-1)! - capturedAts[0]!)
+  return Math.min(capturedAts.length, limit, anchors.size + Math.ceil(durationSeconds / 120))
+}
+
+/**
+ * Selects endpoints, minute anchors, and the strongest adjacent visual changes.
+ * The transition reserve grows by one frame for every two minutes of evidence,
+ * while the hard cap keeps a 30-minute batch within four overlapping 12-frame
+ * requests.
+ */
 export function selectRepresentativeFrameIndexes(
   capturedAts: number[],
   transitionScores: number[],
-  maxFrames = 48
+  maxFrames = LOCAL_VISION_MAX_SELECTED_FRAMES
 ): number[] {
   if (capturedAts.length === 0 || maxFrames <= 0) return []
-  if (capturedAts.length <= Math.max(1, maxFrames) && capturedAts.length <= 2) {
-    return capturedAts.map((_, index) => index)
-  }
 
   const limit = Math.max(1, Math.floor(maxFrames))
   const lastIndex = capturedAts.length - 1
@@ -39,6 +55,9 @@ export function selectRepresentativeFrameIndexes(
   const anchorCapacity = Math.max(0, limit - selected.size)
   for (const index of chooseEvenly(minuteAnchors, anchorCapacity)) selected.add(index)
 
+  const durationAwareLimit = calculateLocalVisionFrameBudget(capturedAts, limit)
+  if (capturedAts.length <= durationAwareLimit) return capturedAts.map((_, index) => index)
+
   const transitions = Array.from({ length: Math.max(0, capturedAts.length - 1) }, (_, offset) => {
     const afterIndex = offset + 1
     return { afterIndex, score: Number(transitionScores[afterIndex] ?? 0) }
@@ -49,12 +68,23 @@ export function selectRepresentativeFrameIndexes(
     const pair = [transition.afterIndex - 1, transition.afterIndex]
     const missing = pair.filter((index) => !selected.has(index))
     if (missing.length === 0) continue
-    if (selected.size + missing.length > limit) continue
+    if (selected.size + missing.length > durationAwareLimit) continue
     for (const index of missing) selected.add(index)
-    if (selected.size === limit) break
+    if (selected.size === durationAwareLimit) break
   }
 
   return [...selected].sort((a, b) => a - b)
+}
+
+function collectAnchorIndexes(capturedAts: number[]): Set<number> {
+  const lastIndex = capturedAts.length - 1
+  const anchors = new Set([0, lastIndex])
+  const firstBoundary = Math.ceil(capturedAts[0]! / 60) * 60
+  const lastTs = capturedAts[lastIndex]!
+  for (let boundary = firstBoundary; boundary <= lastTs; boundary += 60) {
+    anchors.add(findNearestTimestampIndex(capturedAts, boundary))
+  }
+  return anchors
 }
 
 export async function calculateGrayscaleTransitionScores(filePaths: string[]): Promise<number[]> {

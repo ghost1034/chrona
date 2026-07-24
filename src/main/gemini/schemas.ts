@@ -41,7 +41,8 @@ export function buildTranscriptionResponseSchema(): JsonSchema {
 
 export function buildCardGenerationResponseSchema(
   allowedCategories: string[],
-  allowedSubcategoriesByCategory: Readonly<Record<string, readonly string[]>> = {}
+  allowedSubcategoriesByCategory: Readonly<Record<string, readonly string[]>> = {},
+  maxCards?: number
 ): JsonSchema {
   const cats = Array.from(new Set(allowedCategories.map((c) => String(c ?? '').trim()).filter(Boolean)))
   const subcategories = Array.from(
@@ -60,6 +61,7 @@ export function buildCardGenerationResponseSchema(
     properties: {
       cards: {
         type: 'array',
+        ...(Number.isFinite(maxCards) ? { maxItems: Math.max(1, Math.floor(maxCards!)) } : {}),
         items: {
           type: 'object',
           propertyOrdering: [

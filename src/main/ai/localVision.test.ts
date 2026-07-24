@@ -5,9 +5,11 @@ import sharp from 'sharp'
 import { afterEach, describe, expect, it } from 'vitest'
 import {
   buildLocalVisionStoryboards,
+  calculateLocalVisionFrameBudget,
   calculateGrayscaleTransitionScores,
   selectRepresentativeFrameIndexes
 } from './localVision'
+import { buildOverlappingChunks } from './local'
 
 const temporaryDirectories: string[] = []
 
@@ -25,7 +27,7 @@ describe('local vision adaptive sampling', () => {
     scores[90] = 0.9
     const selected = selectRepresentativeFrameIndexes(capturedAts, scores)
 
-    expect(selected.length).toBeLessThanOrEqual(48)
+    expect(selected.length).toBeLessThanOrEqual(45)
     expect(selected[0]).toBe(0)
     expect(selected.at(-1)).toBe(180)
     expect(selected).toEqual([...selected].sort((a, b) => a - b))
@@ -38,12 +40,33 @@ describe('local vision adaptive sampling', () => {
     }
   })
 
+  it.each([
+    { minutes: 5, maxRequests: 1 },
+    { minutes: 20, maxRequests: 3 },
+    { minutes: 30, maxRequests: 4 }
+  ])('keeps $minutes-minute stable and rapid batches within $maxRequests requests', ({ minutes, maxRequests }) => {
+    const capturedAts = Array.from({ length: minutes * 6 + 1 }, (_, index) => 10_005 + index * 10)
+    const stable = selectRepresentativeFrameIndexes(capturedAts, capturedAts.map(() => 0))
+    const rapidScores = capturedAts.map((_, index) => index === 0 ? 0 : index)
+    const rapid = selectRepresentativeFrameIndexes(capturedAts, rapidScores)
+    const budget = calculateLocalVisionFrameBudget(capturedAts)
+
+    expect(stable.length).toBeLessThanOrEqual(budget)
+    expect(rapid.length).toBeLessThanOrEqual(budget)
+    expect(buildOverlappingChunks(stable, 12).length).toBeLessThanOrEqual(maxRequests)
+    expect(buildOverlappingChunks(rapid, 12).length).toBeLessThanOrEqual(maxRequests)
+    expect(stable).toEqual(expect.arrayContaining([0, capturedAts.length - 1]))
+    expect(rapid).toEqual(expect.arrayContaining([0, capturedAts.length - 1]))
+    if (minutes === 20) expect(budget).toBeGreaterThanOrEqual(31)
+    if (minutes === 30) expect(budget).toBe(45)
+  })
+
   it('handles stable, rapidly changing, sparse, and short sequences', () => {
     const stableTimes = Array.from({ length: 181 }, (_, index) => 10_000 + index * 10)
     const stable = selectRepresentativeFrameIndexes(stableTimes, stableTimes.map(() => 0))
     const rapid = selectRepresentativeFrameIndexes(stableTimes, stableTimes.map((_, index) => index))
     expect(stable.length).toBeLessThan(rapid.length)
-    expect(rapid).toHaveLength(48)
+    expect(rapid).toHaveLength(45)
     expect(selectRepresentativeFrameIndexes([0, 120, 360], [0, 0.5, 0.2])).toEqual([0, 1, 2])
     expect(selectRepresentativeFrameIndexes([100, 110], [0, 0])).toEqual([0, 1])
   })

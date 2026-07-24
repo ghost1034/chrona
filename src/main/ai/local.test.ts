@@ -5,11 +5,14 @@ import sharp from 'sharp'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   LocalAIService,
+  buildLocalCardGenerationPrompt,
   buildOverlappingChunks,
+  expandSampledFrameRange,
   isContextLengthError,
   mergeBoundaryObservations,
   selectLocalModels,
-  splitOverlappingChunk
+  splitOverlappingChunk,
+  validateLocalGeneratedCards
 } from './local'
 import { LocalRuntimeUnavailableError } from './errors'
 
@@ -57,6 +60,67 @@ describe('local AI helpers', () => {
       { startTs: 10, endTs: 30, observation: 'Writing', llmModel: 'vision' },
       { startTs: 40, endTs: 50, observation: 'Reading', llmModel: 'vision' }
     ])
+  })
+
+  it('expands sampled evidence to midpoints without crossing real capture gaps', () => {
+    const common = {
+      sampledFrameIndexes: [0, 3, 4, 5],
+      capturedAts: [100, 110, 120, 130, 300, 310],
+      batchStartTs: 100,
+      batchEndTs: 310,
+      screenshotIntervalSeconds: 10
+    }
+    expect(expandSampledFrameRange({ ...common, startFrameIndex: 3, endFrameIndex: 3 }))
+      .toEqual([{ startTs: 115, endTs: 140 }])
+    expect(expandSampledFrameRange({ ...common, startFrameIndex: 4, endFrameIndex: 4 }))
+      .toEqual([{ startTs: 300, endTs: 305 }])
+    expect(expandSampledFrameRange({ ...common, startFrameIndex: 0, endFrameIndex: 4 }))
+      .toEqual([
+        { startTs: 100, endTs: 140 },
+        { startTs: 300, endTs: 305 }
+      ])
+  })
+
+  it('gives exhaustive sampled panels adjacent midpoint-bounded coverage', () => {
+    const common = {
+      sampledFrameIndexes: [0, 3, 6],
+      capturedAts: [100, 110, 120, 130, 140, 150, 160],
+      batchStartTs: 100,
+      batchEndTs: 160,
+      screenshotIntervalSeconds: 10
+    }
+    expect([
+      ...expandSampledFrameRange({ ...common, startFrameIndex: 0, endFrameIndex: 0 }),
+      ...expandSampledFrameRange({ ...common, startFrameIndex: 3, endFrameIndex: 3 }),
+      ...expandSampledFrameRange({ ...common, startFrameIndex: 6, endFrameIndex: 6 })
+    ]).toEqual([
+      { startTs: 100, endTs: 115 },
+      { startTs: 115, endTs: 145 },
+      { startTs: 145, endTs: 160 }
+    ])
+  })
+
+  it('clips harmless local card boundaries and rejects invalid card sequences', () => {
+    const cards: any[] = [
+      { startTs: 100, endTs: 201, category: 'Work', title: 'Build' },
+      { startTs: 200, endTs: 300, category: 'Work', title: 'Test' }
+    ]
+    expect(validateLocalGeneratedCards(cards)).toEqual([
+      expect.objectContaining({ startTs: 100, endTs: 200 }),
+      expect.objectContaining({ startTs: 200, endTs: 300 })
+    ])
+    expect(() => validateLocalGeneratedCards([...cards].reverse())).toThrow('chronological order')
+    expect(() => validateLocalGeneratedCards([
+      { ...cards[0], endTs: 290 },
+      cards[1]
+    ])).toThrow('overlapping cards')
+    expect(() => validateLocalGeneratedCards(Array.from({ length: 13 }, (_, index) => ({
+      startTs: index * 10,
+      endTs: index * 10 + 5,
+      category: 'Work',
+      title: 'Task'
+    })))).toThrow('more than 12 cards')
+    expect(buildLocalCardGenerationPrompt('base')).toContain('overarching user tasks')
   })
 
   it('automatically chooses vision and text models while ignoring embedding models', () => {
@@ -258,6 +322,40 @@ describe('LocalAIService OpenAI compatibility', () => {
     await assertion
   })
 
+  it('uses task-level local card instructions, a 12-card schema cap, and clips boundary overlap', async () => {
+    const { service, log } = makeService()
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      choices: [{ message: { content: JSON.stringify({ cards: [
+        { startTs: 100, endTs: 201, category: 'Work', title: 'Implement', summary: 'Code changes' },
+        { startTs: 200, endTs: 300, category: 'Work', title: 'Verify', summary: 'Tests' }
+      ] }) } }]
+    })))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(service.generateCards({
+      batchId: 3,
+      windowStartTs: 100,
+      windowEndTs: 300,
+      observations: [{ startTs: 100, endTs: 300, observation: 'Development work' }],
+      contextCards: []
+    })).resolves.toEqual({ cards: [
+      expect.objectContaining({ startTs: 100, endTs: 200, title: 'Implement' }),
+      expect.objectContaining({ startTs: 200, endTs: 300, title: 'Verify' })
+    ] })
+
+    const body = JSON.parse(String(fetchMock.mock.calls[0][1].body))
+    expect(body.messages[0].content).toContain('overarching user tasks')
+    expect(body.messages[0].content).toContain('fewest defensible continuous cards')
+    expect(body.response_format.json_schema.schema.properties.cards.maxItems).toBe(12)
+    expect(log.info).toHaveBeenCalledWith('localAI.batchTiming', expect.objectContaining({
+      batchId: 3,
+      phase: 'complete',
+      cardCount: 2,
+      cardCoverageSeconds: 200,
+      cardCoverageRatio: 1
+    }))
+  })
+
   it('maps trusted frame indexes to capture timestamps and never logs image base64', async () => {
     const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'chrona-local-ai-'))
     temporaryDirectories.push(directory)
@@ -282,7 +380,7 @@ describe('LocalAIService OpenAI compatibility', () => {
         new Response(
           JSON.stringify({
             choices: [{ message: { content: JSON.stringify({ observations: [
-              { startFrame: 0, endFrame: 1, observation: 'Editing', appSites: null }
+              { startFrame: 0, endFrame: 1, observation: 'FRAME_0 FRAME_n Editing', appSites: null }
             ] }) } }]
           }),
           { status: 200 }
@@ -299,7 +397,7 @@ describe('LocalAIService OpenAI compatibility', () => {
     })
 
     expect(inserted).toEqual([
-      expect.objectContaining({ startTs: 100, endTs: 120, observation: 'Editing', llmModel: 'vision-model' })
+      expect.objectContaining({ startTs: 100, endTs: 115, observation: 'Editing', llmModel: 'vision-model' })
     ])
     const requestLog = calls.find((call) => call.operation === 'transcribe' && call.requestBody)
     expect(requestLog?.requestBody).toContain('[image omitted]')
@@ -316,11 +414,15 @@ describe('LocalAIService OpenAI compatibility', () => {
           .toFile(path.join(directory, `${index}.jpg`))
       )
     )
-    const fetchMock = vi.fn().mockImplementation(async () =>
-      new Response(JSON.stringify({ choices: [{ message: { content: '{"observations":[]}' } }] }))
-    )
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify({
+        observations: [{ startFrame: 0, endFrame: 11, observation: 'Editing', appSites: null }]
+      }) } }] })))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify({
+        observations: [{ startFrame: 11, endFrame: 11, observation: 'FRAME_11 Editing', appSites: null }]
+      }) } }] })))
     vi.stubGlobal('fetch', fetchMock)
-    const insertObservations = vi.fn(async () => undefined)
+    const insertObservations = vi.fn(async (_batchId: number, _observations: any[]) => undefined)
     const { service, log } = makeService(
       { localVisionMaxImagesPerRequest: 64 },
       {
@@ -345,14 +447,27 @@ describe('LocalAIService OpenAI compatibility', () => {
     const content = bodies.map((body) => body.messages[0].content)
     expect(content.map((parts) => parts.filter((part: any) => part.type === 'image_url').length)).toEqual([3, 1])
     expect(content[0][0].text).toContain('Allowed frame IDs: 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11')
+    expect(content[0][0].text).toContain('smallest exhaustive, non-overlapping segmentation')
+    expect(content[0][0].text).toContain('Never mention or describe them')
     expect(content[1][0].text).toContain('Allowed frame IDs: 11, 12')
+    expect(content[1][0].text).toContain('context-only overlap')
     expect(insertObservations).toHaveBeenCalledTimes(1)
+    expect(insertObservations.mock.calls[0][1]).toHaveLength(12)
+    expect(insertObservations.mock.calls[0][1][0]).toEqual(
+      expect.objectContaining({ startTs: 60, endTs: 70, observation: 'Editing' })
+    )
+    expect(insertObservations.mock.calls[0][1].at(-1)).toEqual(
+      expect.objectContaining({ startTs: 720, endTs: 730, observation: 'Editing' })
+    )
     expect(log.info).toHaveBeenCalledWith('localAI.batchTiming', expect.objectContaining({
       batchId: 7,
       originalFrameCount: 13,
+      selectedFrameBudget: 13,
       sampledFrameCount: 13,
       storyboardCount: 4,
-      requestCount: 2
+      requestCount: 2,
+      observationCount: 12,
+      observationCoverageSeconds: 120
     }))
   })
 

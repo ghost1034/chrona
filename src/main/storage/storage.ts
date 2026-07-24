@@ -40,6 +40,11 @@ export type AnalysisBatchRow = {
   createdAt: string
 }
 
+export type ClaimedAnalysisBatch = {
+  batch: AnalysisBatchRow
+  resumeStatus: 'pending' | 'transcribed'
+}
+
 export type ObservationInsert = {
   startTs: number
   endTs: number
@@ -285,27 +290,94 @@ export class StorageService {
     })
   }
 
-  async fetchNextBatchByStatus(status: string): Promise<AnalysisBatchRow | null> {
+  async claimNextAnalysisBatch(): Promise<ClaimedAnalysisBatch | null> {
     return this.enqueue(() => {
       const db = this.mustDb()
-      const row = db
-        .prepare(
-          `SELECT id, batch_start_ts, batch_end_ts, status, reason, created_at
-           FROM analysis_batches
-           WHERE status = ?
-           ORDER BY id ASC
-           LIMIT 1`
-        )
-        .get(status) as any
-      if (!row) return null
-      return {
-        id: row.id,
-        batchStartTs: row.batch_start_ts,
-        batchEndTs: row.batch_end_ts,
-        status: row.status,
-        reason: row.reason ?? null,
-        createdAt: row.created_at
-      }
+      const claim = db.transaction(() => {
+        const pending = db
+          .prepare(
+            `SELECT id, batch_start_ts, batch_end_ts, status, reason, created_at
+             FROM analysis_batches
+             WHERE status = 'pending'
+             ORDER BY id ASC
+             LIMIT 1`
+          )
+          .get() as any
+        const row = pending ?? db
+          .prepare(
+            `SELECT id, batch_start_ts, batch_end_ts, status, reason, created_at
+             FROM analysis_batches
+             WHERE status = 'transcribed'
+             ORDER BY id ASC
+             LIMIT 1`
+          )
+          .get() as any
+        if (!row) return null
+
+        const resumeStatus: 'pending' | 'transcribed' = row.status
+        const processingStatus = resumeStatus === 'pending'
+          ? 'processing_transcribe'
+          : 'processing_generate_cards'
+        const updated = db
+          .prepare(
+            `UPDATE analysis_batches
+             SET status = ?, reason = NULL
+             WHERE id = ? AND status = ?`
+          )
+          .run(processingStatus, row.id, resumeStatus)
+        if (updated.changes !== 1) return null
+
+        return {
+          batch: {
+            id: row.id,
+            batchStartTs: row.batch_start_ts,
+            batchEndTs: row.batch_end_ts,
+            status: processingStatus,
+            reason: null,
+            createdAt: row.created_at
+          },
+          resumeStatus
+        }
+      })
+      return claim()
+    })
+  }
+
+  async recoverInterruptedAnalysisBatches(): Promise<{
+    pendingBatchIds: number[]
+    transcribedBatchIds: number[]
+  }> {
+    return this.enqueue(() => {
+      const db = this.mustDb()
+      const recover = db.transaction(() => {
+        const pendingBatchIds = (db
+          .prepare(
+            `SELECT id FROM analysis_batches
+             WHERE status = 'processing_transcribe'
+             ORDER BY id ASC`
+          )
+          .all() as Array<{ id: number }>).map((row) => Number(row.id))
+        const transcribedBatchIds = (db
+          .prepare(
+            `SELECT id FROM analysis_batches
+             WHERE status = 'processing_generate_cards'
+             ORDER BY id ASC`
+          )
+          .all() as Array<{ id: number }>).map((row) => Number(row.id))
+
+        db.prepare(
+          `UPDATE analysis_batches
+           SET status = 'pending', reason = NULL
+           WHERE status = 'processing_transcribe'`
+        ).run()
+        db.prepare(
+          `UPDATE analysis_batches
+           SET status = 'transcribed', reason = NULL
+           WHERE status = 'processing_generate_cards'`
+        ).run()
+        return { pendingBatchIds, transcribedBatchIds }
+      })
+      return recover()
     })
   }
 

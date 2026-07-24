@@ -2,7 +2,12 @@ import type { Logger } from '../logger'
 import type { SettingsStore } from '../settings'
 import { normalizeLoopbackBaseUrl } from '../settings'
 import type { ObservationInsert, StorageService } from '../storage/storage'
-import { DEFAULT_CATEGORIES, parseAndValidateCardsJson, stripCodeFences } from '../gemini/cards'
+import {
+  DEFAULT_CATEGORIES,
+  parseAndValidateCardsJson,
+  stripCodeFences,
+  type CardGenerationCard
+} from '../gemini/cards'
 import { buildCardGenerationPrompt } from '../gemini/gemini'
 import { buildCardGenerationResponseSchema, type JsonSchema } from '../gemini/schemas'
 import { getLocalBearerToken } from './localKeychain'
@@ -10,6 +15,7 @@ import { LocalRuntimeUnavailableError } from './errors'
 import type { LocalRuntime, LocalSetupResult } from '../../shared/ipc'
 import {
   buildLocalVisionStoryboards,
+  calculateLocalVisionFrameBudget,
   calculateGrayscaleTransitionScores,
   selectRepresentativeFrameIndexes,
   type LocalVisionFrame
@@ -30,11 +36,24 @@ type JsonResult = { text: string; provider: 'local'; model: string }
 type LocalBatchTiming = {
   startedAt: number
   originalFrameCount: number
+  selectedFrameBudget: number
   sampledFrameCount: number
   storyboardCount: number
   requestCount: number
+  observationCount: number
+  observationCoverageSeconds: number
+  observationCoverageRatio: number
   preprocessingMs: number
   visionMs: number
+}
+
+const LOCAL_CARD_LIMIT = 12
+
+type LocalVisionObservation = {
+  startFrame: number
+  endFrame: number
+  observation: string
+  appSites: { primary: string | null; secondary: string | null } | null
 }
 
 export class LocalAIService {
@@ -276,7 +295,7 @@ export class LocalAIService {
         allowedSubs[category].push(sub.name)
       }
     }
-    const prompt = buildCardGenerationPrompt({
+    const prompt = buildLocalCardGenerationPrompt(buildCardGenerationPrompt({
       ...opts,
       preamble: settings.promptPreambleCards,
       allowedCategories: allowed,
@@ -286,8 +305,11 @@ export class LocalAIService {
         name: s.name,
         description: s.description
       }))
-    })
+    }))
     const callGroupId = `batch:${opts.batchId}:generate_cards:${Date.now()}`
+    let cardCount: number | null = null
+    let cardCoverageSeconds: number | null = null
+    let cardCoverageRatio: number | null = null
     try {
       const raw = await this.chat({
         cfg,
@@ -296,10 +318,11 @@ export class LocalAIService {
         callGroupId,
         batchId: opts.batchId,
         messages: [{ role: 'user', content: prompt }],
-        responseJsonSchema: buildCardGenerationResponseSchema(allowed, allowedSubs)
+        responseJsonSchema: buildCardGenerationResponseSchema(allowed, allowedSubs, LOCAL_CARD_LIMIT)
       })
       try {
         const extracted = stripCodeFences(extractOpenAIText(raw.text))
+        assertLocalCardResponseOrder(extracted)
         const parsed = parseAndValidateCardsJson({
           jsonText: extracted,
           windowStartTs: opts.windowStartTs,
@@ -308,14 +331,22 @@ export class LocalAIService {
           allowedSubcategoriesByCategory: allowedSubs
         })
         if (parsed.cards.length === 0) throw new Error('Local text model returned no valid cards')
+        const cards = validateLocalGeneratedCards(parsed.cards, LOCAL_CARD_LIMIT)
+        cardCount = cards.length
+        cardCoverageSeconds = intervalCoverageSeconds(cards, opts.windowStartTs, opts.windowEndTs)
+        cardCoverageRatio = coverageRatio(cardCoverageSeconds, opts.windowStartTs, opts.windowEndTs)
         await this.recordParse(callGroupId, opts.batchId, cfg.textModel, 'generate_cards_parse', null)
-        return { cards: parsed.cards }
+        return { cards }
       } catch (error) {
         await this.recordParse(callGroupId, opts.batchId, cfg.textModel, 'generate_cards_parse', error)
         throw error
       }
     } finally {
-      this.logCompletedBatchTiming(opts.batchId, Date.now() - cardStartedAt)
+      this.logCompletedBatchTiming(opts.batchId, Date.now() - cardStartedAt, {
+        cardCount,
+        cardCoverageSeconds,
+        cardCoverageRatio
+      })
     }
   }
 
@@ -338,10 +369,12 @@ export class LocalAIService {
       filePath: this.opts.storage.resolveRelPath(screen.filePath)
     }))
     const transitionScores = await calculateGrayscaleTransitionScores(sourceFrames.map((frame) => frame.filePath))
+    const capturedAts = sourceFrames.map((frame) => frame.capturedAt)
+    const selectedFrameBudget = calculateLocalVisionFrameBudget(capturedAts)
     const sampledIndexes = selectRepresentativeFrameIndexes(
-      sourceFrames.map((frame) => frame.capturedAt),
+      capturedAts,
       transitionScores,
-      48
+      selectedFrameBudget
     )
     const frames = sampledIndexes.map((index) => sourceFrames[index]!)
     const initialPreprocessingMs = Date.now() - batchStartedAt
@@ -354,6 +387,7 @@ export class LocalAIService {
         cfg,
         batchId: opts.batchId,
         chunk: chunks[chunkIndex]!,
+        contextFrameIndex: chunkIndex > 0 ? chunks[chunkIndex]![0]!.index : null,
         preamble: settings.promptPreambleTranscribe,
         counters
       })
@@ -361,30 +395,49 @@ export class LocalAIService {
         const startFrame = sourceFrames[item.startFrame]
         const endFrame = sourceFrames[item.endFrame]
         if (!startFrame || !endFrame) throw new Error('Local vision model returned an unknown frame index')
-        const startTs = Math.max(opts.batchStartTs, startFrame.capturedAt)
-        const endTs = Math.min(
-          opts.batchEndTs,
-          Math.max(startTs + 1, endFrame.capturedAt + opts.screenshotIntervalSeconds)
-        )
-        if (endTs <= startTs) continue
-        observations.push({
-          startTs,
-          endTs,
-          observation: item.observation,
-          metadata: item.appSites ? JSON.stringify({ appSites: item.appSites }) : null,
-          llmModel: cfg.visionModel
+        const evidenceIntervals = expandSampledFrameRange({
+          startFrameIndex: item.startFrame,
+          endFrameIndex: item.endFrame,
+          sampledFrameIndexes: sampledIndexes,
+          capturedAts,
+          batchStartTs: opts.batchStartTs,
+          batchEndTs: opts.batchEndTs,
+          screenshotIntervalSeconds: opts.screenshotIntervalSeconds
         })
+        for (const { startTs, endTs } of evidenceIntervals) {
+          if (endTs <= startTs) continue
+          observations.push({
+            startTs,
+            endTs,
+            observation: item.observation,
+            metadata: item.appSites ? JSON.stringify({ appSites: item.appSites }) : null,
+            llmModel: cfg.visionModel
+          })
+        }
       }
     }
 
     const normalized = mergeBoundaryObservations(observations)
     await this.opts.storage.insertObservations(opts.batchId, normalized)
+    const observationCoverageSeconds = intervalCoverageSeconds(
+      normalized,
+      opts.batchStartTs,
+      opts.batchEndTs
+    )
     const timing: LocalBatchTiming = {
       startedAt: batchStartedAt,
       originalFrameCount: sourceFrames.length,
+      selectedFrameBudget,
       sampledFrameCount: frames.length,
       storyboardCount: counters.storyboardCount,
       requestCount: counters.requestCount,
+      observationCount: normalized.length,
+      observationCoverageSeconds,
+      observationCoverageRatio: coverageRatio(
+        observationCoverageSeconds,
+        opts.batchStartTs,
+        opts.batchEndTs
+      ),
       preprocessingMs: initialPreprocessingMs + counters.storyboardMs,
       visionMs: counters.visionMs
     }
@@ -393,9 +446,16 @@ export class LocalAIService {
       batchId: opts.batchId,
       phase: 'vision',
       originalFrameCount: timing.originalFrameCount,
+      selectedFrameBudget: timing.selectedFrameBudget,
       sampledFrameCount: timing.sampledFrameCount,
       storyboardCount: timing.storyboardCount,
       requestCount: timing.requestCount,
+      observationCount: timing.observationCount,
+      observationCoverageSeconds: timing.observationCoverageSeconds,
+      observationCoverageRatio: timing.observationCoverageRatio,
+      cardCount: null,
+      cardCoverageSeconds: null,
+      cardCoverageRatio: null,
       preprocessingMs: timing.preprocessingMs,
       visionMs: timing.visionMs,
       cardGenerationMs: null,
@@ -408,6 +468,7 @@ export class LocalAIService {
     cfg: LocalConfig
     batchId: number
     chunk: LocalVisionFrame[]
+    contextFrameIndex: number | null
     preamble?: string
     counters: { storyboardCount: number; requestCount: number; storyboardMs: number; visionMs: number; chunkSequence: number }
   }): Promise<ReturnType<typeof parseLocalVisionResponse>> {
@@ -417,6 +478,7 @@ export class LocalAIService {
     opts.counters.storyboardCount += storyboards.length
     const prompt = buildLocalVisionPrompt({
       frameIndexes: opts.chunk.map((frame) => frame.index),
+      contextFrameIndex: opts.contextFrameIndex,
       preamble: opts.preamble
     })
     const content: any[] = [{ type: 'text', text: prompt }]
@@ -441,8 +503,13 @@ export class LocalAIService {
       if (isContextLengthError(error) && opts.chunk.length > 2) {
         const smallerChunks = splitOverlappingChunk(opts.chunk)
         const parsed = []
-        for (const smallerChunk of smallerChunks) {
-          parsed.push(...await this.transcribeLocalVisionChunk({ ...opts, chunk: smallerChunk }))
+        for (let index = 0; index < smallerChunks.length; index++) {
+          const smallerChunk = smallerChunks[index]!
+          parsed.push(...await this.transcribeLocalVisionChunk({
+            ...opts,
+            chunk: smallerChunk,
+            contextFrameIndex: index === 0 ? opts.contextFrameIndex : smallerChunk[0]!.index
+          }))
         }
         return parsed
       }
@@ -455,22 +522,37 @@ export class LocalAIService {
         new Set(opts.chunk.map((frame) => frame.index))
       )
       await this.recordParse(callGroupId, opts.batchId, opts.cfg.visionModel, 'transcribe_parse', null)
-      return parsed
+      return clipContextOnlyFrame(parsed, opts.chunk, opts.contextFrameIndex)
     } catch (error) {
       await this.recordParse(callGroupId, opts.batchId, opts.cfg.visionModel, 'transcribe_parse', error)
       throw error
     }
   }
 
-  private logCompletedBatchTiming(batchId: number, cardGenerationMs: number) {
+  private logCompletedBatchTiming(
+    batchId: number,
+    cardGenerationMs: number,
+    cards: {
+      cardCount: number | null
+      cardCoverageSeconds: number | null
+      cardCoverageRatio: number | null
+    }
+  ) {
     const timing = this.batchTimings.get(batchId)
     this.opts.log.info('localAI.batchTiming', {
       batchId,
       phase: 'complete',
       originalFrameCount: timing?.originalFrameCount ?? null,
+      selectedFrameBudget: timing?.selectedFrameBudget ?? null,
       sampledFrameCount: timing?.sampledFrameCount ?? null,
       storyboardCount: timing?.storyboardCount ?? null,
       requestCount: timing?.requestCount ?? null,
+      observationCount: timing?.observationCount ?? null,
+      observationCoverageSeconds: timing?.observationCoverageSeconds ?? null,
+      observationCoverageRatio: timing?.observationCoverageRatio ?? null,
+      cardCount: cards.cardCount,
+      cardCoverageSeconds: cards.cardCoverageSeconds,
+      cardCoverageRatio: cards.cardCoverageRatio,
       preprocessingMs: timing?.preprocessingMs ?? null,
       visionMs: timing?.visionMs ?? null,
       cardGenerationMs,
@@ -735,7 +817,213 @@ export function mergeBoundaryObservations(observations: ObservationInsert[]): Ob
   return out
 }
 
-function parseLocalVisionResponse(text: string, allowedIndexes: Set<number>) {
+export function expandSampledFrameRange(opts: {
+  startFrameIndex: number
+  endFrameIndex: number
+  sampledFrameIndexes: number[]
+  capturedAts: number[]
+  batchStartTs: number
+  batchEndTs: number
+  screenshotIntervalSeconds: number
+}): Array<{ startTs: number; endTs: number }> {
+  const startPosition = opts.sampledFrameIndexes.indexOf(opts.startFrameIndex)
+  const endPosition = opts.sampledFrameIndexes.indexOf(opts.endFrameIndex)
+  if (startPosition < 0 || endPosition < startPosition) {
+    throw new Error('Local vision model returned an invalid sampled frame range')
+  }
+
+  const startCapturedAt = opts.capturedAts[opts.startFrameIndex]
+  const endCapturedAt = opts.capturedAts[opts.endFrameIndex]
+  if (!Number.isFinite(startCapturedAt) || !Number.isFinite(endCapturedAt)) {
+    throw new Error('Local vision model returned an unknown frame index')
+  }
+
+  const previousIndex = opts.sampledFrameIndexes[startPosition - 1]
+  const nextIndex = opts.sampledFrameIndexes[endPosition + 1]
+  const startTs = previousIndex !== undefined && hasNormalCaptureCadence(
+    opts.capturedAts,
+    previousIndex,
+    opts.startFrameIndex,
+    opts.screenshotIntervalSeconds
+  )
+    ? Math.floor((opts.capturedAts[previousIndex]! + startCapturedAt) / 2)
+    : startCapturedAt
+  const endTs = nextIndex !== undefined && hasNormalCaptureCadence(
+    opts.capturedAts,
+    opts.endFrameIndex,
+    nextIndex,
+    opts.screenshotIntervalSeconds
+  )
+    ? Math.floor((endCapturedAt + opts.capturedAts[nextIndex]!) / 2)
+    : endCapturedAt + opts.screenshotIntervalSeconds
+
+  const boundedStart = Math.max(opts.batchStartTs, startTs)
+  const boundedEnd = Math.min(opts.batchEndTs, endTs)
+  const intervals: Array<{ startTs: number; endTs: number }> = []
+  let segmentStart = boundedStart
+  for (let index = opts.startFrameIndex + 1; index <= opts.endFrameIndex; index++) {
+    if (hasNormalCaptureCadence(
+      opts.capturedAts,
+      index - 1,
+      index,
+      opts.screenshotIntervalSeconds
+    )) continue
+    const segmentEnd = Math.min(
+      boundedEnd,
+      opts.capturedAts[index - 1]! + opts.screenshotIntervalSeconds
+    )
+    if (segmentEnd > segmentStart) intervals.push({ startTs: segmentStart, endTs: segmentEnd })
+    segmentStart = Math.max(boundedStart, opts.capturedAts[index]!)
+  }
+  if (boundedEnd > segmentStart) intervals.push({ startTs: segmentStart, endTs: boundedEnd })
+  return intervals
+}
+
+export function validateLocalGeneratedCards(
+  cards: CardGenerationCard[],
+  maxCards = LOCAL_CARD_LIMIT
+): CardGenerationCard[] {
+  if (cards.length > maxCards) {
+    throw new Error(`Local text model returned more than ${maxCards} cards`)
+  }
+
+  const normalized = cards.map((card) => ({ ...card }))
+  for (let index = 0; index < normalized.length; index++) {
+    const current = normalized[index]!
+    if (!Number.isFinite(current.startTs) || !Number.isFinite(current.endTs) || current.endTs <= current.startTs) {
+      throw new Error('Local text model returned an invalid card range')
+    }
+    const previous = normalized[index - 1]
+    if (!previous) continue
+    if (current.startTs < previous.startTs) {
+      throw new Error('Local text model returned cards out of chronological order')
+    }
+    if (current.startTs >= previous.endTs) continue
+
+    const overlapSeconds = previous.endTs - current.startTs
+    const shorterDuration = Math.min(
+      previous.endTs - previous.startTs,
+      current.endTs - current.startTs
+    )
+    const harmlessBoundaryOverlap =
+      current.startTs > previous.startTs &&
+      current.endTs > previous.endTs &&
+      overlapSeconds <= 5 &&
+      overlapSeconds < shorterDuration
+    if (!harmlessBoundaryOverlap) {
+      throw new Error('Local text model returned overlapping cards')
+    }
+    previous.endTs = current.startTs
+  }
+  return normalized
+}
+
+function assertLocalCardResponseOrder(jsonText: string): void {
+  let parsed: any
+  try {
+    parsed = JSON.parse(jsonText)
+  } catch {
+    return
+  }
+  if (!Array.isArray(parsed?.cards)) return
+  let previousStart = Number.NEGATIVE_INFINITY
+  for (const card of parsed.cards) {
+    const start = Number(card?.startTs)
+    if (!Number.isFinite(start)) continue
+    if (start < previousStart) {
+      throw new Error('Local text model returned cards out of chronological order')
+    }
+    previousStart = start
+  }
+}
+
+export function buildLocalCardGenerationPrompt(basePrompt: string): string {
+  return [
+    basePrompt,
+    '',
+    'Local task-level card rules:',
+    '- Cards represent overarching user tasks, not individual apps, windows, screenshots, or observations.',
+    '- Consolidate repeated wording and brief supporting window switches into the same continuous task.',
+    '- Split only for a clear change of intent, sustained unrelated activity, or explicit idle evidence.',
+    '- Prefer the fewest defensible continuous cards; output no more than 12 cards for this window.',
+    '- Keep titles and summaries concise.'
+  ].join('\n')
+}
+
+function clipContextOnlyFrame(
+  observations: LocalVisionObservation[],
+  chunk: LocalVisionFrame[],
+  contextFrameIndex: number | null
+): LocalVisionObservation[] {
+  if (contextFrameIndex === null) return observations
+  const firstEvidenceFrame = chunk[1]?.index
+  if (firstEvidenceFrame === undefined) return []
+  return observations.flatMap((observation) => {
+    if (observation.endFrame === contextFrameIndex) return []
+    if (observation.startFrame !== contextFrameIndex) return [observation]
+    return [{ ...observation, startFrame: firstEvidenceFrame }]
+  })
+}
+
+function hasNormalCaptureCadence(
+  capturedAts: number[],
+  startIndex: number,
+  endIndex: number,
+  screenshotIntervalSeconds: number
+): boolean {
+  const maxNormalGap = Math.max(
+    screenshotIntervalSeconds + 2,
+    Math.ceil(screenshotIntervalSeconds * 1.5)
+  )
+  for (let index = startIndex + 1; index <= endIndex; index++) {
+    const gap = capturedAts[index]! - capturedAts[index - 1]!
+    if (!Number.isFinite(gap) || gap <= 0 || gap > maxNormalGap) return false
+  }
+  return true
+}
+
+function intervalCoverageSeconds(
+  intervals: Array<{ startTs: number; endTs: number }>,
+  rangeStartTs: number,
+  rangeEndTs: number
+): number {
+  const clipped = intervals
+    .map((interval) => [
+      Math.max(rangeStartTs, interval.startTs),
+      Math.min(rangeEndTs, interval.endTs)
+    ] as const)
+    .filter(([start, end]) => end > start)
+    .sort((a, b) => a[0] - b[0] || a[1] - b[1])
+  let coverage = 0
+  let currentStart: number | null = null
+  let currentEnd: number | null = null
+  for (const [start, end] of clipped) {
+    if (currentStart === null || currentEnd === null) {
+      currentStart = start
+      currentEnd = end
+      continue
+    }
+    if (start <= currentEnd) {
+      currentEnd = Math.max(currentEnd, end)
+      continue
+    }
+    coverage += currentEnd - currentStart
+    currentStart = start
+    currentEnd = end
+  }
+  if (currentStart !== null && currentEnd !== null) coverage += currentEnd - currentStart
+  return coverage
+}
+
+function coverageRatio(coverageSeconds: number, startTs: number, endTs: number): number {
+  const duration = Math.max(0, endTs - startTs)
+  return duration > 0 ? coverageSeconds / duration : 0
+}
+
+function parseLocalVisionResponse(
+  text: string,
+  allowedIndexes: Set<number>
+): LocalVisionObservation[] {
   let parsed: any
   try {
     parsed = JSON.parse(stripCodeFences(text))
@@ -746,7 +1034,7 @@ function parseLocalVisionResponse(text: string, allowedIndexes: Set<number>) {
   return parsed.observations.map((item: any) => {
     const startFrame = Math.floor(Number(item?.startFrame))
     const endFrame = Math.floor(Number(item?.endFrame))
-    const observation = String(item?.observation ?? '').trim()
+    const observation = stripSyntheticFrameLabels(String(item?.observation ?? ''))
     if (!allowedIndexes.has(startFrame) || !allowedIndexes.has(endFrame) || endFrame < startFrame) {
       throw new Error('Local vision model returned an invalid frame range')
     }
@@ -761,16 +1049,35 @@ function parseLocalVisionResponse(text: string, allowedIndexes: Set<number>) {
   })
 }
 
-function buildLocalVisionPrompt(opts: { frameIndexes: number[]; preamble?: string }) {
+function buildLocalVisionPrompt(opts: {
+  frameIndexes: number[]
+  contextFrameIndex: number | null
+  preamble?: string
+}) {
   const exampleFrame = opts.frameIndexes[0] ?? 0
   return [
     'Return valid JSON only.',
     opts.preamble?.trim() ? `User instructions:\n${opts.preamble.trim()}` : '',
     'The attached storyboard panels are visibly labeled with trusted original frame IDs.',
     `Allowed frame IDs: ${opts.frameIndexes.join(', ')}.`,
-    'Describe visible activity factually. Return inclusive startFrame/endFrame ranges using only those IDs.',
+    opts.contextFrameIndex === null
+      ? ''
+      : `FRAME_${opts.contextFrameIndex} is context-only overlap from the prior request. Do not emit an observation only for it; ranges that continue past it must start at the next supplied frame.`,
+    'Return the smallest exhaustive, non-overlapping segmentation of every supplied panel.',
+    'Merge adjacent panels when they show the same activity.',
+    'Describe visible activity factually and use inclusive startFrame/endFrame ranges using only those IDs.',
+    'The FRAME_n panel labels are synthetic Chrona markers. Never mention or describe them in observation text.',
     `Output: {"observations":[{"startFrame":${exampleFrame},"endFrame":${exampleFrame},"observation":"...","appSites":{"primary":null,"secondary":null}}]}`
   ].filter(Boolean).join('\n')
+}
+
+function stripSyntheticFrameLabels(value: string): string {
+  return value
+    .replace(/\bFRAME_(?:\d+|n)\b/gi, '')
+    .replace(/\s+([,.;:])/g, '$1')
+    .replace(/\s{2,}/g, ' ')
+    .replace(/^[\s,.;:–—-]+|[\s,.;:–—-]+$/g, '')
+    .trim()
 }
 
 function extractOpenAIText(raw: string): string {

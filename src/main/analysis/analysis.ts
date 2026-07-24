@@ -1,5 +1,5 @@
 import type { Logger } from '../logger'
-import type { StorageService } from '../storage/storage'
+import type { ClaimedAnalysisBatch, StorageService } from '../storage/storage'
 import { createScreenshotBatches } from '../../shared/batching'
 import { AIService } from '../ai/ai'
 import type { SettingsStore } from '../settings'
@@ -24,10 +24,9 @@ export class AnalysisService {
   private tickInFlight: Promise<{ createdBatchIds: number[]; unprocessedCount: number }> | null =
     null
 
-  private processingInFlight = false
-  private processingBatchId: number | null = null
+  private processingInFlight: Promise<void> | null = null
+  private startupRecoveryPending = true
   private readonly ai: AIService
-  private processingResumeStatus: 'pending' | 'transcribed' | null = null
 
   constructor(opts: {
     storage: StorageService
@@ -47,6 +46,7 @@ export class AnalysisService {
   start() {
     if (this.timer) return
     this.stopped = false
+    this.startupRecoveryPending = true
     this.log.info('analysis.start', {})
     void this.drainPendingBatches()
     this.scheduleNextTick(0)
@@ -187,103 +187,106 @@ export class AnalysisService {
   }
 
   private async drainPendingBatches(): Promise<void> {
-    if (this.processingInFlight) return
+    if (this.processingInFlight) return this.processingInFlight
+    const processing = this.drainPendingBatchesSingleFlight()
+    this.processingInFlight = processing
+    try {
+      await processing
+    } finally {
+      if (this.processingInFlight === processing) this.processingInFlight = null
+    }
+  }
 
+  private async drainPendingBatchesSingleFlight(): Promise<void> {
+    if (this.startupRecoveryPending) {
+      this.startupRecoveryPending = false
+      const recovered = await this.storage.recoverInterruptedAnalysisBatches()
+      for (const batchId of recovered.pendingBatchIds) {
+        this.events.analysisBatchUpdated({ batchId, status: 'pending', reason: null })
+      }
+      for (const batchId of recovered.transcribedBatchIds) {
+        this.events.analysisBatchUpdated({ batchId, status: 'transcribed', reason: null })
+      }
+      if (recovered.pendingBatchIds.length > 0 || recovered.transcribedBatchIds.length > 0) {
+        this.log.info('analysis.recoveredInterruptedBatches', {
+          pendingBatchIds: recovered.pendingBatchIds,
+          transcribedBatchIds: recovered.transcribedBatchIds
+        })
+      }
+    }
     const providerStatus = await this.ai.getProviderStatus()
     if (!providerStatus.configured) {
       this.log.warn('analysis.aiNotConfigured', { provider: providerStatus.provider })
       return
     }
 
-    this.processingInFlight = true
-    try {
-      while (true) {
-        const batch =
-          (await this.storage.fetchNextBatchByStatus('pending')) ??
-          (await this.storage.fetchNextBatchByStatus('transcribed'))
-        if (!batch) return
-        this.processingBatchId = batch.id
-        this.processingResumeStatus = batch.status === 'transcribed' ? 'transcribed' : 'pending'
-
-        if (batch.status === 'transcribed') {
-          await this.generateCardsForBatch(batch.id)
-          this.processingBatchId = null
-          this.processingResumeStatus = null
-          continue
-        }
-
-        const screenshots = await this.storage.getBatchScreenshots(batch.id)
-        if (screenshots.length === 0) {
+    while (true) {
+      const claimed = await this.storage.claimNextAnalysisBatch()
+      if (!claimed) return
+      this.events.analysisBatchUpdated({
+        batchId: claimed.batch.id,
+        status: claimed.batch.status,
+        reason: null
+      })
+      try {
+        await this.processClaimedBatch(claimed)
+      } catch (e) {
+        const message = e instanceof Error ? e.message : String(e)
+        this.log.error('analysis.batchFailed', { batchId: claimed.batch.id, message })
+        if (isLocalRuntimeUnavailable(e)) {
           await this.storage.setBatchStatus({
-            batchId: batch.id,
-            status: 'failed_empty',
-            reason: 'empty'
+            batchId: claimed.batch.id,
+            status: claimed.resumeStatus,
+            reason: message
           })
           this.events.analysisBatchUpdated({
-            batchId: batch.id,
-            status: 'failed_empty',
-            reason: 'empty'
+            batchId: claimed.batch.id,
+            status: claimed.resumeStatus,
+            reason: message
           })
-          this.processingBatchId = null
-          continue
+        } else {
+          await this.failBatchWithSystemCard(claimed.batch.id, message)
         }
-
-        await this.storage.setBatchStatus({
-          batchId: batch.id,
-          status: 'processing_transcribe',
-          reason: null
-        })
-        this.events.analysisBatchUpdated({ batchId: batch.id, status: 'processing_transcribe' })
-
-        const intervalSeconds = (await this.settings.getAll()).captureIntervalSeconds
-        const res = await this.ai.transcribeBatch({
-          batchId: batch.id,
-          batchStartTs: batch.batchStartTs,
-          batchEndTs: batch.batchEndTs,
-          screenshots: screenshots.map((screen) => ({
-            filePath: screen.filePath,
-            capturedAt: screen.capturedAt
-          })),
-          screenshotIntervalSeconds: intervalSeconds
-        })
-
-        if (res.observationsInserted === 0) {
-          await this.storage.setBatchStatus({ batchId: batch.id, status: 'analyzed', reason: '0_observations' })
-          this.events.analysisBatchUpdated({ batchId: batch.id, status: 'analyzed', reason: '0_observations' })
-          this.processingBatchId = null
-          this.processingResumeStatus = null
-          continue
-        }
-
-        await this.storage.setBatchStatus({
-          batchId: batch.id,
-          status: 'transcribed',
-          reason: `observations=${res.observationsInserted}`
-        })
-        this.events.analysisBatchUpdated({
-          batchId: batch.id,
-          status: 'transcribed',
-          reason: `observations=${res.observationsInserted}`
-        })
-
-        this.processingBatchId = null
-        this.processingResumeStatus = null
+        return
       }
-    } catch (e) {
-      const message = e instanceof Error ? e.message : String(e)
-      this.log.error('analysis.batchFailed', { message })
-      if (this.processingBatchId && isLocalRuntimeUnavailable(e)) {
-        const status = this.processingResumeStatus ?? 'pending'
-        await this.storage.setBatchStatus({ batchId: this.processingBatchId, status, reason: message })
-        this.events.analysisBatchUpdated({ batchId: this.processingBatchId, status, reason: message })
-      } else if (this.processingBatchId) {
-        await this.failBatchWithSystemCard(this.processingBatchId, message)
-      }
-    } finally {
-      this.processingBatchId = null
-      this.processingResumeStatus = null
-      this.processingInFlight = false
     }
+  }
+
+  private async processClaimedBatch(claimed: ClaimedAnalysisBatch): Promise<void> {
+    const batch = claimed.batch
+    if (claimed.resumeStatus === 'transcribed') {
+      await this.generateCardsForBatch(batch.id)
+      return
+    }
+
+    const screenshots = await this.storage.getBatchScreenshots(batch.id)
+    if (screenshots.length === 0) {
+      await this.storage.setBatchStatus({ batchId: batch.id, status: 'failed_empty', reason: 'empty' })
+      this.events.analysisBatchUpdated({ batchId: batch.id, status: 'failed_empty', reason: 'empty' })
+      return
+    }
+
+    const intervalSeconds = (await this.settings.getAll()).captureIntervalSeconds
+    const res = await this.ai.transcribeBatch({
+      batchId: batch.id,
+      batchStartTs: batch.batchStartTs,
+      batchEndTs: batch.batchEndTs,
+      screenshots: screenshots.map((screen) => ({
+        filePath: screen.filePath,
+        capturedAt: screen.capturedAt
+      })),
+      screenshotIntervalSeconds: intervalSeconds
+    })
+
+    if (res.observationsInserted === 0) {
+      await this.storage.setBatchStatus({ batchId: batch.id, status: 'analyzed', reason: '0_observations' })
+      this.events.analysisBatchUpdated({ batchId: batch.id, status: 'analyzed', reason: '0_observations' })
+      return
+    }
+
+    const reason = `observations=${res.observationsInserted}`
+    await this.storage.setBatchStatus({ batchId: batch.id, status: 'transcribed', reason })
+    this.events.analysisBatchUpdated({ batchId: batch.id, status: 'transcribed', reason })
   }
 
   private async generateCardsForBatch(batchId: number): Promise<void> {
@@ -294,13 +297,6 @@ export class AnalysisService {
 
     const windowEndTs = batch.batchEndTs
     const windowStartTs = Math.max(0, windowEndTs - cfg.windowLookbackSec)
-
-    await this.storage.setBatchStatus({
-      batchId,
-      status: 'processing_generate_cards',
-      reason: null
-    })
-    this.events.analysisBatchUpdated({ batchId, status: 'processing_generate_cards' })
 
     const observations = await this.storage.fetchObservationsInRange({
       startTs: windowStartTs,

@@ -18,6 +18,7 @@ describe('buildCardGenerationResponseSchema', () => {
   test('only permits null when no subcategories exist', () => {
     const schema = buildCardGenerationResponseSchema(['Work'])
 
+    expect(schema.properties.cards.maxItems).toBeUndefined()
     expect(schema.properties.cards.items.properties.subcategory).toEqual({
       type: 'null',
       description: 'No subcategories are configured, so this must be null.'
