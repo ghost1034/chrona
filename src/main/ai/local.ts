@@ -1,4 +1,3 @@
-import sharp from 'sharp'
 import type { Logger } from '../logger'
 import type { SettingsStore } from '../settings'
 import { normalizeLoopbackBaseUrl } from '../settings'
@@ -9,6 +8,12 @@ import { buildCardGenerationResponseSchema, type JsonSchema } from '../gemini/sc
 import { getLocalBearerToken } from './localKeychain'
 import { LocalRuntimeUnavailableError } from './errors'
 import type { LocalRuntime, LocalSetupResult } from '../../shared/ipc'
+import {
+  buildLocalVisionStoryboards,
+  calculateGrayscaleTransitionScores,
+  selectRepresentativeFrameIndexes,
+  type LocalVisionFrame
+} from './localVision'
 
 type LocalConfig = {
   baseUrl: string
@@ -22,7 +27,19 @@ type LocalConfig = {
 
 type JsonResult = { text: string; provider: 'local'; model: string }
 
+type LocalBatchTiming = {
+  startedAt: number
+  originalFrameCount: number
+  sampledFrameCount: number
+  storyboardCount: number
+  requestCount: number
+  preprocessingMs: number
+  visionMs: number
+}
+
 export class LocalAIService {
+  private readonly batchTimings = new Map<number, LocalBatchTiming>()
+
   constructor(
     private readonly opts: {
       storage: StorageService
@@ -116,7 +133,7 @@ export class LocalAIService {
         visionModel: null,
         textModel: null,
         message: `${runtimeName(selected.runtime)} is running, but it has no models available. Download a vision model, then try again.`,
-        recommendedCommand: selected.runtime === 'ollama' ? 'ollama pull qwen3-vl:4b' : null
+        recommendedCommand: selected.runtime === 'ollama' ? 'ollama pull qwen3-vl:4b-instruct' : null
       }
     }
     if (!visionModel) {
@@ -128,9 +145,12 @@ export class LocalAIService {
         visionModel: null,
         textModel,
         message: `${runtimeName(selected.runtime)} was found and the text model was selected, but Chrona also needs a vision model to understand screenshots.`,
-        recommendedCommand: selected.runtime === 'ollama' ? 'ollama pull qwen3-vl:4b' : null
+        recommendedCommand: selected.runtime === 'ollama' ? 'ollama pull qwen3-vl:4b-instruct' : null
       }
     }
+    const thinkingSelections = [visionModel, textModel].filter(
+      (model): model is string => !!model && isKnownThinkingModel(model)
+    )
     return {
       status: 'ready',
       runtime: selected.runtime,
@@ -138,8 +158,12 @@ export class LocalAIService {
       models: selected.models,
       visionModel,
       textModel: textModel!,
-      message: `${runtimeName(selected.runtime)} is ready. Chrona selected ${visionModel === textModel ? visionModel : `${visionModel} for vision and ${textModel} for text`}.`,
-      recommendedCommand: null
+      message: thinkingSelections.length > 0
+        ? `${runtimeName(selected.runtime)} is ready, but ${Array.from(new Set(thinkingSelections)).join(' and ')} may spend substantial time thinking. Install and select the non-thinking instruct model for faster analysis.`
+        : `${runtimeName(selected.runtime)} is ready. Chrona selected ${visionModel === textModel ? visionModel : `${visionModel} for vision and ${textModel} for text`}.`,
+      recommendedCommand: thinkingSelections.length > 0 && selected.runtime === 'ollama'
+        ? 'ollama pull qwen3-vl:4b-instruct'
+        : null
     }
   }
 
@@ -237,6 +261,7 @@ export class LocalAIService {
       summary?: string | null
     }>
   }) {
+    const cardStartedAt = Date.now()
     const cfg = await this.resolveConfig()
     if (!cfg.textModel) throw new LocalRuntimeUnavailableError('Choose a local text model')
     const settings = await this.opts.settings.getAll()
@@ -263,30 +288,34 @@ export class LocalAIService {
       }))
     })
     const callGroupId = `batch:${opts.batchId}:generate_cards:${Date.now()}`
-    const raw = await this.chat({
-      cfg,
-      model: cfg.textModel,
-      operation: 'generate_cards',
-      callGroupId,
-      batchId: opts.batchId,
-      messages: [{ role: 'user', content: prompt }],
-      responseJsonSchema: buildCardGenerationResponseSchema(allowed, allowedSubs)
-    })
     try {
-      const extracted = stripCodeFences(extractOpenAIText(raw.text))
-      const parsed = parseAndValidateCardsJson({
-        jsonText: extracted,
-        windowStartTs: opts.windowStartTs,
-        windowEndTs: opts.windowEndTs,
-        allowedCategories: allowed,
-        allowedSubcategoriesByCategory: allowedSubs
+      const raw = await this.chat({
+        cfg,
+        model: cfg.textModel,
+        operation: 'generate_cards',
+        callGroupId,
+        batchId: opts.batchId,
+        messages: [{ role: 'user', content: prompt }],
+        responseJsonSchema: buildCardGenerationResponseSchema(allowed, allowedSubs)
       })
-      if (parsed.cards.length === 0) throw new Error('Local text model returned no valid cards')
-      await this.recordParse(callGroupId, opts.batchId, cfg.textModel, 'generate_cards_parse', null)
-      return { cards: parsed.cards }
-    } catch (error) {
-      await this.recordParse(callGroupId, opts.batchId, cfg.textModel, 'generate_cards_parse', error)
-      throw error
+      try {
+        const extracted = stripCodeFences(extractOpenAIText(raw.text))
+        const parsed = parseAndValidateCardsJson({
+          jsonText: extracted,
+          windowStartTs: opts.windowStartTs,
+          windowEndTs: opts.windowEndTs,
+          allowedCategories: allowed,
+          allowedSubcategoriesByCategory: allowedSubs
+        })
+        if (parsed.cards.length === 0) throw new Error('Local text model returned no valid cards')
+        await this.recordParse(callGroupId, opts.batchId, cfg.textModel, 'generate_cards_parse', null)
+        return { cards: parsed.cards }
+      } catch (error) {
+        await this.recordParse(callGroupId, opts.batchId, cfg.textModel, 'generate_cards_parse', error)
+        throw error
+      }
+    } finally {
+      this.logCompletedBatchTiming(opts.batchId, Date.now() - cardStartedAt)
     }
   }
 
@@ -301,53 +330,36 @@ export class LocalAIService {
     if (!cfg.visionModel) throw new LocalRuntimeUnavailableError('Choose a local vision model')
     if (opts.screenshots.length === 0) return { observationsInserted: 0 }
 
+    const batchStartedAt = Date.now()
     const settings = await this.opts.settings.getAll()
-    const frames = await Promise.all(
-      opts.screenshots.map(async (screen, index) => ({
-        index,
-        capturedAt: screen.capturedAt,
-        dataUrl: `data:image/jpeg;base64,${(
-          await sharp(this.opts.storage.resolveRelPath(screen.filePath))
-            .resize({ height: 540, withoutEnlargement: true })
-            .jpeg({ quality: 78 })
-            .toBuffer()
-        ).toString('base64')}`
-      }))
+    const sourceFrames: LocalVisionFrame[] = opts.screenshots.map((screen, index) => ({
+      index,
+      capturedAt: screen.capturedAt,
+      filePath: this.opts.storage.resolveRelPath(screen.filePath)
+    }))
+    const transitionScores = await calculateGrayscaleTransitionScores(sourceFrames.map((frame) => frame.filePath))
+    const sampledIndexes = selectRepresentativeFrameIndexes(
+      sourceFrames.map((frame) => frame.capturedAt),
+      transitionScores,
+      48
     )
+    const frames = sampledIndexes.map((index) => sourceFrames[index]!)
+    const initialPreprocessingMs = Date.now() - batchStartedAt
 
     const observations: ObservationInsert[] = []
     const chunks = buildOverlappingChunks(frames, cfg.visionMaxImagesPerRequest)
+    const counters = { storyboardCount: 0, requestCount: 0, storyboardMs: 0, visionMs: 0, chunkSequence: 0 }
     for (let chunkIndex = 0; chunkIndex < chunks.length; chunkIndex++) {
-      const chunk = chunks[chunkIndex]
-      const prompt = buildLocalVisionPrompt({
-        frameIndexes: chunk.map((f) => f.index),
-        preamble: settings.promptPreambleTranscribe
-      })
-      const content: any[] = [{ type: 'text', text: prompt }]
-      for (const frame of chunk) {
-        content.push({ type: 'text', text: `FRAME_${frame.index}` })
-        content.push({ type: 'image_url', image_url: { url: frame.dataUrl } })
-      }
-      const callGroupId = `batch:${opts.batchId}:transcribe:${Date.now()}:chunk:${chunkIndex}`
-      const raw = await this.chat({
+      const parsed = await this.transcribeLocalVisionChunk({
         cfg,
-        model: cfg.visionModel,
-        operation: 'transcribe',
-        callGroupId,
         batchId: opts.batchId,
-        messages: [{ role: 'user', content }],
-        responseJsonSchema: LOCAL_VISION_SCHEMA
+        chunk: chunks[chunkIndex]!,
+        preamble: settings.promptPreambleTranscribe,
+        counters
       })
-      let parsed: ReturnType<typeof parseLocalVisionResponse>
-      try {
-        parsed = parseLocalVisionResponse(extractOpenAIText(raw.text), new Set(chunk.map((f) => f.index)))
-      } catch (error) {
-        await this.recordParse(callGroupId, opts.batchId, cfg.visionModel, 'transcribe_parse', error)
-        throw error
-      }
       for (const item of parsed) {
-        const startFrame = frames[item.startFrame]
-        const endFrame = frames[item.endFrame]
+        const startFrame = sourceFrames[item.startFrame]
+        const endFrame = sourceFrames[item.endFrame]
         if (!startFrame || !endFrame) throw new Error('Local vision model returned an unknown frame index')
         const startTs = Math.max(opts.batchStartTs, startFrame.capturedAt)
         const endTs = Math.min(
@@ -363,12 +375,108 @@ export class LocalAIService {
           llmModel: cfg.visionModel
         })
       }
-      await this.recordParse(callGroupId, opts.batchId, cfg.visionModel, 'transcribe_parse', null)
     }
 
     const normalized = mergeBoundaryObservations(observations)
     await this.opts.storage.insertObservations(opts.batchId, normalized)
+    const timing: LocalBatchTiming = {
+      startedAt: batchStartedAt,
+      originalFrameCount: sourceFrames.length,
+      sampledFrameCount: frames.length,
+      storyboardCount: counters.storyboardCount,
+      requestCount: counters.requestCount,
+      preprocessingMs: initialPreprocessingMs + counters.storyboardMs,
+      visionMs: counters.visionMs
+    }
+    this.batchTimings.set(opts.batchId, timing)
+    this.opts.log.info('localAI.batchTiming', {
+      batchId: opts.batchId,
+      phase: 'vision',
+      originalFrameCount: timing.originalFrameCount,
+      sampledFrameCount: timing.sampledFrameCount,
+      storyboardCount: timing.storyboardCount,
+      requestCount: timing.requestCount,
+      preprocessingMs: timing.preprocessingMs,
+      visionMs: timing.visionMs,
+      cardGenerationMs: null,
+      totalDurationMs: Date.now() - timing.startedAt
+    })
     return { observationsInserted: normalized.length }
+  }
+
+  private async transcribeLocalVisionChunk(opts: {
+    cfg: LocalConfig
+    batchId: number
+    chunk: LocalVisionFrame[]
+    preamble?: string
+    counters: { storyboardCount: number; requestCount: number; storyboardMs: number; visionMs: number; chunkSequence: number }
+  }): Promise<ReturnType<typeof parseLocalVisionResponse>> {
+    const storyboardStartedAt = Date.now()
+    const storyboards = await buildLocalVisionStoryboards(opts.chunk)
+    opts.counters.storyboardMs += Date.now() - storyboardStartedAt
+    opts.counters.storyboardCount += storyboards.length
+    const prompt = buildLocalVisionPrompt({
+      frameIndexes: opts.chunk.map((frame) => frame.index),
+      preamble: opts.preamble
+    })
+    const content: any[] = [{ type: 'text', text: prompt }]
+    for (const dataUrl of storyboards) content.push({ type: 'image_url', image_url: { url: dataUrl } })
+    const sequence = opts.counters.chunkSequence++
+    const callGroupId = `batch:${opts.batchId}:transcribe:${Date.now()}:chunk:${sequence}`
+    opts.counters.requestCount++
+    const visionStartedAt = Date.now()
+    let raw: Awaited<ReturnType<LocalAIService['chat']>>
+    try {
+      raw = await this.chat({
+        cfg: opts.cfg,
+        model: opts.cfg.visionModel,
+        operation: 'transcribe',
+        callGroupId,
+        batchId: opts.batchId,
+        messages: [{ role: 'user', content }],
+        responseJsonSchema: LOCAL_VISION_SCHEMA
+      })
+    } catch (error) {
+      opts.counters.visionMs += Date.now() - visionStartedAt
+      if (isContextLengthError(error) && opts.chunk.length > 2) {
+        const smallerChunks = splitOverlappingChunk(opts.chunk)
+        const parsed = []
+        for (const smallerChunk of smallerChunks) {
+          parsed.push(...await this.transcribeLocalVisionChunk({ ...opts, chunk: smallerChunk }))
+        }
+        return parsed
+      }
+      throw error
+    }
+    opts.counters.visionMs += Date.now() - visionStartedAt
+    try {
+      const parsed = parseLocalVisionResponse(
+        extractOpenAIText(raw.text),
+        new Set(opts.chunk.map((frame) => frame.index))
+      )
+      await this.recordParse(callGroupId, opts.batchId, opts.cfg.visionModel, 'transcribe_parse', null)
+      return parsed
+    } catch (error) {
+      await this.recordParse(callGroupId, opts.batchId, opts.cfg.visionModel, 'transcribe_parse', error)
+      throw error
+    }
+  }
+
+  private logCompletedBatchTiming(batchId: number, cardGenerationMs: number) {
+    const timing = this.batchTimings.get(batchId)
+    this.opts.log.info('localAI.batchTiming', {
+      batchId,
+      phase: 'complete',
+      originalFrameCount: timing?.originalFrameCount ?? null,
+      sampledFrameCount: timing?.sampledFrameCount ?? null,
+      storyboardCount: timing?.storyboardCount ?? null,
+      requestCount: timing?.requestCount ?? null,
+      preprocessingMs: timing?.preprocessingMs ?? null,
+      visionMs: timing?.visionMs ?? null,
+      cardGenerationMs,
+      totalDurationMs: timing ? Date.now() - timing.startedAt : cardGenerationMs
+    })
+    this.batchTimings.delete(batchId)
   }
 
   async recordParse(
@@ -399,7 +507,7 @@ export class LocalAIService {
       requestTimeoutMs: clamp(Number(settings.localRequestTimeoutMs), 1_000, 30 * 60_000, 300_000),
       maxAttempts: clamp(Number(settings.localMaxAttempts), 1, 10, 2),
       logBodies: !!settings.localLogBodies,
-      visionMaxImagesPerRequest: clamp(Number(settings.localVisionMaxImagesPerRequest), 2, 64, 12)
+      visionMaxImagesPerRequest: clamp(Number(settings.localVisionMaxImagesPerRequest), 4, 12, 12)
     }
   }
 
@@ -593,6 +701,16 @@ export function buildOverlappingChunks<T>(items: T[], maxSize: number): T[][] {
   return chunks
 }
 
+export function splitOverlappingChunk<T>(items: T[]): T[][] {
+  if (items.length <= 2) return [items]
+  return buildOverlappingChunks(items, Math.ceil((items.length + 1) / 2))
+}
+
+export function isContextLengthError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error)
+  return /(?:context[_ -](?:length|window|size)|context overflow|maximum context|exceeds?[^\n]*context|num_ctx|too many tokens|input (?:is )?too long|token limit)/i.test(message)
+}
+
 export function mergeBoundaryObservations(observations: ObservationInsert[]): ObservationInsert[] {
   const sorted = [...observations].sort((a, b) => a.startTs - b.startTs || a.endTs - b.endTs)
   const out: ObservationInsert[] = []
@@ -644,13 +762,14 @@ function parseLocalVisionResponse(text: string, allowedIndexes: Set<number>) {
 }
 
 function buildLocalVisionPrompt(opts: { frameIndexes: number[]; preamble?: string }) {
+  const exampleFrame = opts.frameIndexes[0] ?? 0
   return [
     'Return valid JSON only.',
     opts.preamble?.trim() ? `User instructions:\n${opts.preamble.trim()}` : '',
-    'The attached screenshots are labeled with trusted frame IDs.',
+    'The attached storyboard panels are visibly labeled with trusted original frame IDs.',
     `Allowed frame IDs: ${opts.frameIndexes.join(', ')}.`,
     'Describe visible activity factually. Return inclusive startFrame/endFrame ranges using only those IDs.',
-    'Output: {"observations":[{"startFrame":0,"endFrame":0,"observation":"...","appSites":{"primary":null,"secondary":null}}]}'
+    `Output: {"observations":[{"startFrame":${exampleFrame},"endFrame":${exampleFrame},"observation":"...","appSites":{"primary":null,"secondary":null}}]}`
   ].filter(Boolean).join('\n')
 }
 
@@ -743,10 +862,22 @@ export function selectLocalModels(
   const models = Array.from(new Set(modelIds.map((id) => id.trim()).filter(Boolean)))
   const usableText = models.filter((id) => !isEmbeddingModel(id))
   const vision = usableText.filter(isVisionModel)
-  const visionModel = chooseModel(vision, existing.visionModel, scoreVisionModel)
+  const existingVision = existing.visionModel?.trim()
+  const visionModel = existingVision && usableText.includes(existingVision)
+    ? existingVision
+    : chooseModel(vision, null, scoreVisionModel)
   const textOnly = usableText.filter((id) => !isVisionModel(id))
-  const textPool = textOnly.length > 0 ? textOnly : vision
-  const textModel = chooseModel(textPool, existing.textModel, scoreTextModel)
+  const nonThinkingText = textOnly.filter((id) => !isKnownThinkingModel(id))
+  const nonThinkingVision = vision.filter((id) => !isKnownThinkingModel(id))
+  const textPool = nonThinkingText.length > 0
+    ? nonThinkingText
+    : nonThinkingVision.length > 0
+      ? nonThinkingVision
+      : textOnly.length > 0 ? textOnly : vision
+  const existingText = existing.textModel?.trim()
+  const textModel = existingText && usableText.includes(existingText)
+    ? existingText
+    : chooseModel(textPool, null, scoreTextModel)
   return { visionModel, textModel }
 }
 
@@ -770,19 +901,33 @@ function isEmbeddingModel(id: string) {
 }
 
 function scoreVisionModel(id: string) {
-  if (/qwen3[-_.]?vl/i.test(id)) return 50
-  if (/qwen2\.5[-_.]?vl/i.test(id)) return 45
-  if (/gemma[-_.]?3/i.test(id)) return 40
-  if (/llama[-_.]?3\.2[-_.]?vision/i.test(id)) return 35
-  if (/pixtral|llava/i.test(id)) return 30
-  return 10
+  const variant = scoreVariant(id)
+  if (/qwen3[-_.]?vl/i.test(id)) return 50 + variant
+  if (/qwen2\.5[-_.]?vl/i.test(id)) return 45 + variant
+  if (/gemma[-_.]?3/i.test(id)) return 40 + variant
+  if (/llama[-_.]?3\.2[-_.]?vision/i.test(id)) return 35 + variant
+  if (/pixtral|llava/i.test(id)) return 30 + variant
+  return 10 + variant
 }
 
 function scoreTextModel(id: string) {
-  if (/qwen3/i.test(id)) return 40
-  if (/llama|mistral|gemma/i.test(id)) return 30
-  if (/instruct|chat/i.test(id)) return 20
-  return 10
+  const variant = scoreVariant(id)
+  if (/qwen3/i.test(id)) return 40 + variant
+  if (/llama|mistral|gemma/i.test(id)) return 30 + variant
+  if (/instruct|chat/i.test(id)) return 20 + variant
+  return 10 + variant
+}
+
+function scoreVariant(id: string) {
+  if (/(?:instruct|non[-_.]?thinking|no[-_.]?think)/i.test(id)) return 100
+  if (isKnownThinkingModel(id)) return -100
+  return 0
+}
+
+function isKnownThinkingModel(id: string) {
+  if (/(?:instruct|non[-_.]?thinking|no[-_.]?think)/i.test(id)) return false
+  if (/(?:thinking|reasoning)/i.test(id)) return true
+  return /(?:^|\/)qwen3(?:[-_.]?vl)?(?::(?:latest|[0-9]+b(?:[-_.][a-z0-9]+)?)|$)/i.test(id)
 }
 
 function runtimeName(runtime: LocalRuntime) {

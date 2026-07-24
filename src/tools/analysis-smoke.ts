@@ -19,7 +19,7 @@ async function main() {
   const storage = new StorageService({ userDataPath: baseDir })
   await storage.init()
 
-  // Create screenshots spanning exactly 30 minutes with maxGap=5m.
+  // Create the default 181 screenshots spanning exactly 30 minutes.
   // Then add a couple more screenshots that should form an incomplete trailing batch (and be dropped).
   const nowMs = Date.now()
   const startMs = nowMs - 2 * 60 * 60 * 1000
@@ -29,8 +29,8 @@ async function main() {
     'base64'
   )
 
-  for (let i = 0; i <= 6; i++) {
-    const t = startMs + i * 5 * 60 * 1000
+  for (let i = 0; i <= 180; i++) {
+    const t = startMs + i * 10 * 1000
     await storage.saveScreenshotJpeg({ capturedAtMs: t, jpegBytes })
   }
   // Two screenshots that should become a dropped trailing batch.
@@ -58,7 +58,9 @@ async function main() {
   const before = await storage.fetchUnprocessedScreenshots({
     sinceTs: Math.floor((nowMs - 24 * 60 * 60 * 1000) / 1000)
   })
+  const analysisStartedAt = Date.now()
   const res = await analysis.runTickNow()
+  const totalDurationMs = Date.now() - analysisStartedAt
   const after = await storage.fetchUnprocessedScreenshots({
     sinceTs: Math.floor((nowMs - 24 * 60 * 60 * 1000) / 1000)
   })
@@ -66,6 +68,9 @@ async function main() {
 
   const firstBatch = recent[recent.length - 1]
   const cards = firstBatch ? await storage.fetchCardsForDay(dayKeyFromUnixSeconds(firstBatch.batchStartTs)) : []
+  const llmMetrics = firstBatch
+    ? await storage.fetchLLMCallMetricsForBatch(firstBatch.id)
+    : { requestCount: 0, visionRequestCount: 0, totalLatencyMs: 0 }
 
   if (process.env.CHRONA_SMOKE_TIMELAPSE) {
     await timelapse.waitForIdle()
@@ -80,7 +85,15 @@ async function main() {
         tick: res,
         afterUnprocessedCount: after.length,
         recentBatches: recent,
-        cardsCount: cards.length
+        cardsCount: cards.length,
+        timing: {
+          totalDurationMs,
+          llmLatencyMs: llmMetrics.totalLatencyMs
+        },
+        requests: {
+          total: llmMetrics.requestCount,
+          vision: llmMetrics.visionRequestCount
+        }
       },
       null,
       2

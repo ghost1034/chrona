@@ -3,7 +3,14 @@ import os from 'node:os'
 import path from 'node:path'
 import sharp from 'sharp'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { LocalAIService, buildOverlappingChunks, mergeBoundaryObservations, selectLocalModels } from './local'
+import {
+  LocalAIService,
+  buildOverlappingChunks,
+  isContextLengthError,
+  mergeBoundaryObservations,
+  selectLocalModels,
+  splitOverlappingChunk
+} from './local'
 import { LocalRuntimeUnavailableError } from './errors'
 
 vi.mock('./localKeychain', () => ({ getLocalBearerToken: async () => null }))
@@ -27,6 +34,16 @@ describe('local AI helpers', () => {
       [22, 26]
     ])
     expect(new Set(chunks.flat())).toEqual(new Set(Array.from({ length: 27 }, (_, index) => index)))
+    expect(buildOverlappingChunks(Array.from({ length: 48 }, (_, index) => index), 12)).toHaveLength(5)
+  })
+
+  it('splits context-heavy chunks into smaller overlapping chunks', () => {
+    expect(splitOverlappingChunk([0, 1, 2, 3, 4, 5])).toEqual([
+      [0, 1, 2, 3],
+      [3, 4, 5]
+    ])
+    expect(isContextLengthError(new Error('prompt exceeds the context window'))).toBe(true)
+    expect(isContextLengthError(new Error('connection failed'))).toBe(false)
   })
 
   it('deduplicates and merges identical boundary observations', () => {
@@ -49,8 +66,8 @@ describe('local AI helpers', () => {
       'qwen3-vl:4b',
       'llava:7b'
     ])).toEqual({
-      visionModel: 'qwen3-vl:4b',
-      textModel: 'qwen3:4b'
+      visionModel: 'llava:7b',
+      textModel: 'llava:7b'
     })
     expect(selectLocalModels(['qwen3-vl:4b'])).toEqual({
       visionModel: 'qwen3-vl:4b',
@@ -59,6 +76,29 @@ describe('local AI helpers', () => {
     expect(selectLocalModels(['gemma3:1b'])).toEqual({
       visionModel: null,
       textModel: 'gemma3:1b'
+    })
+  })
+
+  it('prefers non-thinking instruct variants and preserves explicit custom selections', () => {
+    expect(selectLocalModels([
+      'qwen3-vl:4b',
+      'qwen3-vl:4b-instruct',
+      'qwen3:4b',
+      'qwen3:4b-instruct'
+    ])).toEqual({
+      visionModel: 'qwen3-vl:4b-instruct',
+      textModel: 'qwen3:4b-instruct'
+    })
+    expect(selectLocalModels(['qwen3-vl:4b-instruct'])).toEqual({
+      visionModel: 'qwen3-vl:4b-instruct',
+      textModel: 'qwen3-vl:4b-instruct'
+    })
+    expect(selectLocalModels(['my-custom-model'], {
+      visionModel: 'my-custom-model',
+      textModel: 'my-custom-model'
+    })).toEqual({
+      visionModel: 'my-custom-model',
+      textModel: 'my-custom-model'
     })
   })
 })
@@ -104,8 +144,33 @@ describe('LocalAIService OpenAI compatibility', () => {
       runtime: 'ollama',
       textModel: 'llama3.2:3b',
       visionModel: null,
-      recommendedCommand: 'ollama pull qwen3-vl:4b'
+      recommendedCommand: 'ollama pull qwen3-vl:4b-instruct'
     })
+  })
+
+  it('warns without downloading when explicitly selected models are known thinking aliases', async () => {
+    const { service } = makeService({
+      localVisionModel: 'qwen3-vl:4b',
+      localTextModel: 'qwen3:4b'
+    })
+    const fetchMock = vi.fn((url: string, _init?: RequestInit) => {
+      if (url.startsWith('http://127.0.0.1:11434/')) {
+        return Promise.resolve(new Response(JSON.stringify({
+          data: [{ id: 'qwen3-vl:4b' }, { id: 'qwen3:4b' }]
+        })))
+      }
+      return Promise.reject(Object.assign(new Error('fetch failed'), { cause: { code: 'ECONNREFUSED' } }))
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(service.autoConfigure()).resolves.toMatchObject({
+      status: 'ready',
+      visionModel: 'qwen3-vl:4b',
+      textModel: 'qwen3:4b',
+      message: expect.stringContaining('thinking'),
+      recommendedCommand: 'ollama pull qwen3-vl:4b-instruct'
+    })
+    expect(fetchMock.mock.calls.every((call) => call[1]?.method !== 'POST')).toBe(true)
   })
 
   it('discovers models with optional auth and rejects redirects', async () => {
@@ -198,7 +263,7 @@ describe('LocalAIService OpenAI compatibility', () => {
     temporaryDirectories.push(directory)
     await Promise.all(
       [0, 1, 2].map((index) =>
-        sharp({ create: { width: 20, height: 20, channels: 3, background: { r: index, g: 2, b: 3 } } })
+        sharp({ create: { width: 20, height: 20, channels: 3, background: { r: index * 100, g: 2, b: 3 } } })
           .jpeg()
           .toFile(path.join(directory, `${index}.jpg`))
       )
@@ -241,11 +306,61 @@ describe('LocalAIService OpenAI compatibility', () => {
     expect(requestLog?.requestBody).not.toContain('base64')
   })
 
+  it('sends no more than 12 represented frames and three storyboards with boundary overlap', async () => {
+    const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'chrona-local-ai-'))
+    temporaryDirectories.push(directory)
+    await Promise.all(
+      Array.from({ length: 13 }, (_, index) =>
+        sharp({ create: { width: 8, height: 8, channels: 3, background: '#123456' } })
+          .jpeg()
+          .toFile(path.join(directory, `${index}.jpg`))
+      )
+    )
+    const fetchMock = vi.fn().mockImplementation(async () =>
+      new Response(JSON.stringify({ choices: [{ message: { content: '{"observations":[]}' } }] }))
+    )
+    vi.stubGlobal('fetch', fetchMock)
+    const insertObservations = vi.fn(async () => undefined)
+    const { service, log } = makeService(
+      { localVisionMaxImagesPerRequest: 64 },
+      {
+        resolveRelPath: (relativePath: string) => path.join(directory, relativePath),
+        insertObservations
+      }
+    )
+
+    await service.transcribeBatch({
+      batchId: 7,
+      batchStartTs: 60,
+      batchEndTs: 60 + 13 * 60,
+      screenshots: Array.from({ length: 13 }, (_, index) => ({
+        filePath: `${index}.jpg`,
+        capturedAt: 60 + index * 60
+      })),
+      screenshotIntervalSeconds: 10
+    })
+
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    const bodies = fetchMock.mock.calls.map((call) => JSON.parse(String(call[1].body)))
+    const content = bodies.map((body) => body.messages[0].content)
+    expect(content.map((parts) => parts.filter((part: any) => part.type === 'image_url').length)).toEqual([3, 1])
+    expect(content[0][0].text).toContain('Allowed frame IDs: 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11')
+    expect(content[1][0].text).toContain('Allowed frame IDs: 11, 12')
+    expect(insertObservations).toHaveBeenCalledTimes(1)
+    expect(log.info).toHaveBeenCalledWith('localAI.batchTiming', expect.objectContaining({
+      batchId: 7,
+      originalFrameCount: 13,
+      sampledFrameCount: 13,
+      storyboardCount: 4,
+      requestCount: 2
+    }))
+  })
+
   it('inserts no observations when a later chunk is malformed', async () => {
     const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'chrona-local-ai-'))
     temporaryDirectories.push(directory)
     await Promise.all(
-      [0, 1, 2].map((index) =>
+      [0, 1, 2, 3, 4, 5].map((index) =>
         sharp({ create: { width: 2, height: 2, channels: 3, background: '#000' } })
           .jpeg()
           .toFile(path.join(directory, `${index}.jpg`))
@@ -265,11 +380,46 @@ describe('LocalAIService OpenAI compatibility', () => {
         batchId: 5,
         batchStartTs: 100,
         batchEndTs: 130,
-        screenshots: [0, 1, 2].map((index) => ({ filePath: `${index}.jpg`, capturedAt: 100 + index * 10 })),
+        screenshots: [0, 1, 2, 3, 4, 5].map((index) => ({ filePath: `${index}.jpg`, capturedAt: 100 + index * 60 })),
         screenshotIntervalSeconds: 10
       })
     ).rejects.toThrow('invalid JSON')
     expect(insertObservations).not.toHaveBeenCalled()
+  })
+
+  it('splits only a chunk rejected for context length and inserts once after all retries succeed', async () => {
+    const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'chrona-local-ai-'))
+    temporaryDirectories.push(directory)
+    await Promise.all(
+      [0, 1, 2, 3, 4, 5].map((index) =>
+        sharp({ create: { width: 8, height: 8, channels: 3, background: { r: index * 20, g: 0, b: 0 } } })
+          .jpeg()
+          .toFile(path.join(directory, `${index}.jpg`))
+      )
+    )
+    const insertObservations = vi.fn()
+    const { service } = makeService(
+      { localVisionMaxImagesPerRequest: 6 },
+      { resolveRelPath: (relativePath: string) => path.join(directory, relativePath), insertObservations }
+    )
+    const valid = JSON.stringify({ choices: [{ message: { content: '{"observations":[]}' } }] })
+    vi.stubGlobal('fetch', vi.fn()
+      .mockResolvedValueOnce(new Response('{"error":"context length exceeded"}', { status: 400 }))
+      .mockResolvedValueOnce(new Response(valid))
+      .mockResolvedValueOnce(new Response(valid)))
+
+    await expect(service.transcribeBatch({
+      batchId: 6,
+      batchStartTs: 100,
+      batchEndTs: 500,
+      screenshots: [0, 1, 2, 3, 4, 5].map((index) => ({
+        filePath: `${index}.jpg`,
+        capturedAt: 100 + index * 60
+      })),
+      screenshotIntervalSeconds: 10
+    })).resolves.toEqual({ observationsInserted: 0 })
+    expect(fetch).toHaveBeenCalledTimes(3)
+    expect(insertObservations).toHaveBeenCalledTimes(1)
   })
 })
 
@@ -299,6 +449,7 @@ function makeService(settingsOverrides: Record<string, unknown> = {}, storageOve
     insertObservations: async () => undefined,
     ...storageOverrides
   }
+  const log = { warn: vi.fn(), info: vi.fn(), error: vi.fn(), debug: vi.fn() }
   const service = new LocalAIService({
     settings: {
       getAll: async () => settings,
@@ -309,7 +460,7 @@ function makeService(settingsOverrides: Record<string, unknown> = {}, storageOve
       }
     } as any,
     storage: storage as any,
-    log: { warn: vi.fn(), info: vi.fn(), error: vi.fn() } as any
+    log: log as any
   })
-  return { service, calls, storage, settingUpdates }
+  return { service, calls, storage, settingUpdates, log }
 }

@@ -42,12 +42,12 @@ describe('LocalAISetup', () => {
           visionModel: null,
           textModel: null,
           message: 'Ollama needs a model.',
-          recommendedCommand: 'ollama pull qwen3-vl:4b'
+          recommendedCommand: 'ollama pull qwen3-vl:4b-instruct'
         }}
       />
     )
     expect(html).toContain('model files are large')
-    expect(html).toContain('ollama pull qwen3-vl:4b')
+    expect(html).toContain('ollama pull qwen3-vl:4b-instruct')
     expect(html).toContain('Open Ollama setup guide')
   })
 })

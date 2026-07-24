@@ -928,7 +928,7 @@ export function App() {
   async function onSaveLocalAI() {
     const timeoutMs = Math.max(1000, Math.floor(Number(localRequestTimeoutMs)))
     const attempts = Math.max(1, Math.floor(Number(localMaxAttempts)))
-    const maxImages = Math.max(2, Math.floor(Number(localVisionMaxImagesPerRequest)))
+    const maxImages = Math.max(4, Math.min(12, Math.floor(Number(localVisionMaxImagesPerRequest))))
     setLocalAILine('Saving…')
     try {
       await window.chrona.updateSettings({

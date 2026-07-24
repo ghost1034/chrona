@@ -1220,8 +1220,8 @@ export function SettingsView(props: {
                       <input className="input" type="number" min={1} value={props.localMaxAttempts}
                         onChange={(event) => props.setLocalMaxAttempts(Number(event.target.value))} />
                     </label>
-                    <label className="label">Images per vision request
-                      <input className="input" type="number" min={2} value={props.localVisionMaxImagesPerRequest}
+                    <label className="label">Source frames per vision request
+                      <input className="input" type="number" min={4} max={12} value={props.localVisionMaxImagesPerRequest}
                         onChange={(event) => props.setLocalVisionMaxImagesPerRequest(Number(event.target.value))} />
                     </label>
                   </div>

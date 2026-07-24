@@ -1288,6 +1288,28 @@ export class StorageService {
     })
   }
 
+  async fetchLLMCallMetricsForBatch(batchId: number): Promise<{
+    requestCount: number
+    visionRequestCount: number
+    totalLatencyMs: number
+  }> {
+    return this.enqueue(() => {
+      const row = this.mustDb().prepare(`
+        SELECT
+          COUNT(CASE WHEN request_method IS NOT NULL THEN 1 END) AS request_count,
+          COUNT(CASE WHEN request_method IS NOT NULL AND operation = 'transcribe' THEN 1 END) AS vision_request_count,
+          COALESCE(SUM(CASE WHEN request_method IS NOT NULL THEN latency_ms ELSE 0 END), 0) AS total_latency_ms
+        FROM llm_calls
+        WHERE batch_id = ?
+      `).get(batchId) as any
+      return {
+        requestCount: Number(row?.request_count ?? 0),
+        visionRequestCount: Number(row?.vision_request_count ?? 0),
+        totalLatencyMs: Number(row?.total_latency_ms ?? 0)
+      }
+    })
+  }
+
   async purgeStragglers(): Promise<{ deletedCount: number }> {
     // Best-effort cleanup; intended to mirror the original app's "straggler" deletion.
     const roots = ['recordings/screenshots', 'timelapses']
