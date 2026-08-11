@@ -14,6 +14,9 @@ jobs:
   build:
     name: Build (${{ matrix.target }})
     runs-on: ${{ matrix.os }}
+    env:
+      MAC_CSC_LINK: ${{ secrets.MAC_CSC_LINK }}
+      MAC_CSC_KEY_PASSWORD: ${{ secrets.MAC_CSC_KEY_PASSWORD }}
     strategy:
       fail-fast: false
       matrix:
@@ -50,13 +53,21 @@ jobs:
       - name: Set release version
         run: npm version --no-git-tag-version "0.1.${{ github.run_number }}"
 
-      - name: Build + package
+      - name: Build + package (signed)
+        if: matrix.target == 'mac' && env.MAC_CSC_LINK != ''
         run: ${{ matrix.dist_cmd }}
         env:
           # A Developer ID Application certificate is required for macOS auto-update.
-          # Contributor builds remain unsigned when these repository secrets are absent.
-          CSC_LINK: ${{ matrix.target == 'mac' && secrets.MAC_CSC_LINK || '' }}
-          CSC_KEY_PASSWORD: ${{ matrix.target == 'mac' && secrets.MAC_CSC_KEY_PASSWORD || '' }}
+          CSC_LINK: ${{ env.MAC_CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ env.MAC_CSC_KEY_PASSWORD }}
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+
+      - name: Build + package (unsigned)
+        if: matrix.target != 'mac' || env.MAC_CSC_LINK == ''
+        run: ${{ matrix.dist_cmd }}
+        env:
+          # Do not define CSC_LINK when the signing secret is absent. electron-builder
+          # otherwise interprets the empty value as the current directory.
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
 
       - name: Upload packaged artifacts
