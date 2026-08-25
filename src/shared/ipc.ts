@@ -63,6 +63,10 @@ export type CaptureAccessInfo = {
 export type SetupStatus = {
   platform: NodeJS.Platform
   hasGeminiKey: boolean
+  geminiAccess: {
+    available: boolean
+    source: 'cpaautomation' | 'api_key' | null
+  }
   captureAccess: CaptureAccessInfo
 }
 

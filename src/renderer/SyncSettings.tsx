@@ -71,8 +71,9 @@ export function SyncSettings() {
     <div className="settingsSection">
       <div className="sideTitle">Sync</div>
       <div className="sideMeta">
-        Push timeline cards to a CPAAutomation dashboard. Only card titles, summaries, categories, and
-        times are sent — screenshots and videos never leave this device.
+        Push timeline cards to a CPAAutomation dashboard and use CPAAutomation for Gemini analysis while
+        linked. Analysis sends compressed timeline video; ordinary sync sends only card text, categories,
+        and times.
       </div>
 
       <div className="row">

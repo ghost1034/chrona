@@ -66,6 +66,9 @@ export function App() {
   const [analysisCardWindowMinutes, setAnalysisCardWindowMinutes] = useState<string>('60')
 
   const [hasGeminiKey, setHasGeminiKey] = useState<boolean | null>(null)
+  const [geminiAccessSource, setGeminiAccessSource] = useState<
+    'cpaautomation' | 'api_key' | null
+  >(null)
   const [setupStatus, setSetupStatus] = useState<SetupStatus | null>(null)
   const [onboardingCompleted, setOnboardingCompleted] = useState<boolean>(true)
   const [geminiKeyInput, setGeminiKeyInput] = useState<string>('')
@@ -229,7 +232,8 @@ export function App() {
     try {
       const st = await window.chrona.getSetupStatus()
       setSetupStatus(st)
-      setHasGeminiKey(st.hasGeminiKey)
+      setHasGeminiKey(st.geminiAccess.available)
+      setGeminiAccessSource(st.geminiAccess.source)
     } catch {
       // ignore
     }
@@ -365,12 +369,18 @@ export function App() {
       dispatchRoute({ type: 'navigate', target })
     })
 
+    // Pairing and unpairing changes which Gemini transport is available.
+    const unsubSync = window.chrona.onSyncStatusChanged(() => {
+      void refreshSetupStatus()
+    })
+
     return () => {
       unsubState()
       unsubErr()
       unsubAnalysis()
       unsubUsage()
       unsubNav()
+      unsubSync()
     }
   }, [])
 
@@ -1480,14 +1490,14 @@ export function App() {
         </div>
       ) : null}
 
-      {setupStatus && !setupStatus.hasGeminiKey ? (
+      {setupStatus && !setupStatus.geminiAccess.available ? (
         <div className="setupBanner">
           <div className="setupBannerLeft">
-            <div className="setupBannerTitle">Gemini API key missing</div>
-            <div className="setupBannerMeta">Recording works, but analysis will stay pending until a key is configured.</div>
+            <div className="setupBannerTitle">Gemini access missing</div>
+            <div className="setupBannerMeta">Recording works, but analysis will stay pending until CPAAutomation is linked or a key is configured.</div>
           </div>
           <button className="btn" onClick={() => setView('onboarding')}>
-            Add key
+            Configure
           </button>
         </div>
       ) : null}
@@ -2013,6 +2023,7 @@ export function App() {
                   autoStartEnabled={autoStartEnabled}
                   onToggleAutoStartEnabled={onToggleAutoStartEnabled}
                   hasGeminiKey={hasGeminiKey}
+                  geminiAccessSource={geminiAccessSource}
                   geminiKeyInput={geminiKeyInput}
                   setGeminiKeyInput={setGeminiKeyInput}
                   onSaveGeminiKey={onSaveGeminiKey}
@@ -2086,7 +2097,7 @@ export function App() {
             <div className="sidePanel">
               <div className="sideTitle">Setup status</div>
               <div className="sideMeta">
-                Gemini key: {setupStatus ? (setupStatus.hasGeminiKey ? 'configured' : 'missing') : '...'}
+                Gemini access: {setupStatus ? (setupStatus.geminiAccess.available ? 'configured' : 'missing') : '...'}
                 {setupStatus?.platform === 'darwin'
                   ? ` · Capture: ${setupStatus.captureAccess.status === 'granted' ? 'granted' : 'missing'}`
                   : ''}
@@ -2169,7 +2180,7 @@ export function App() {
               <div className="block">
                 <div className="sideTitle">System</div>
                 <div className="sideMeta">
-                  Gemini key: {hasGeminiKey === null ? '...' : hasGeminiKey ? 'configured' : 'missing'} · Capture:
+                  Gemini access: {hasGeminiKey === null ? '...' : hasGeminiKey ? 'configured' : 'missing'} · Capture:
                   {recording ? ' recording' : ' idle'}
                 </div>
                 <div className="row">
@@ -2206,7 +2217,7 @@ export function App() {
               <div className="block">
                 <div className="sideTitle">Settings</div>
                 <div className="sideMeta">
-                  Gemini key: {hasGeminiKey === null ? '...' : hasGeminiKey ? 'configured' : 'missing'}
+                  Gemini access: {hasGeminiKey === null ? '...' : hasGeminiKey ? 'configured' : 'missing'}
                 </div>
                 <div className="row">
                   <button className="btn" onClick={() => setView('settings')}>
@@ -2235,7 +2246,7 @@ export function App() {
               <div className="block">
                 <div className="sideTitle">Gemini draft</div>
                 <div className="sideMeta">
-                  Key: {hasGeminiKey === null ? '...' : hasGeminiKey ? 'configured' : 'missing'}
+                  Access: {hasGeminiKey === null ? '...' : hasGeminiKey ? 'configured' : 'missing'}
                 </div>
 
                 <div className="row">
@@ -2357,7 +2368,7 @@ export function App() {
               <div className="block">
                 <div className="sideTitle">Settings</div>
                 <div className="sideMeta">
-                  Gemini key: {hasGeminiKey === null ? '...' : hasGeminiKey ? 'configured' : 'missing'}
+                  Gemini access: {hasGeminiKey === null ? '...' : hasGeminiKey ? 'configured' : 'missing'}
                 </div>
                 <div className="row">
                   <button className="btn" onClick={() => setView('settings')}>

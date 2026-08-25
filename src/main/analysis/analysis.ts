@@ -3,7 +3,7 @@ import type { StorageService } from '../storage/storage'
 import { createScreenshotBatches } from '../../shared/batching'
 import { GeminiService } from '../gemini/gemini'
 import type { SettingsStore } from '../settings'
-import { getGeminiApiKey } from '../gemini/keychain'
+import { getGeminiAccessStatus } from '../gemini/transport'
 import { dayKeyFromUnixSeconds } from '../../shared/time'
 import type { TimelapseService } from '../timelapse/timelapse'
 
@@ -115,7 +115,12 @@ export class AnalysisService {
 
     const unprocessed = await this.storage.fetchUnprocessedScreenshots({ sinceTs })
     const unprocessedCount = unprocessed.length
-    if (unprocessedCount === 0) return { createdBatchIds: [], unprocessedCount }
+    if (unprocessedCount === 0) {
+      // A newly linked account/key should also resume batches that were left
+      // pending while Gemini access was unavailable.
+      await this.drainPendingBatches()
+      return { createdBatchIds: [], unprocessedCount }
+    }
 
     const batches = createScreenshotBatches(
       unprocessed.map((s) => ({ id: s.id, capturedAt: s.capturedAt })),
@@ -183,10 +188,10 @@ export class AnalysisService {
   private async drainPendingBatches(): Promise<void> {
     if (this.processingInFlight) return
 
-    const apiKey = await getGeminiApiKey()
-    if (!apiKey && !process.env.CHRONA_GEMINI_MOCK) {
-      // Leave batches as pending; user can add a key later.
-      this.log.warn('analysis.geminiKeyMissing')
+    const geminiAccess = await getGeminiAccessStatus()
+    if (!geminiAccess.available && !process.env.CHRONA_GEMINI_MOCK) {
+      // Leave batches pending until the user links CPAAutomation or adds a key.
+      this.log.warn('analysis.geminiAccessMissing')
       return
     }
 

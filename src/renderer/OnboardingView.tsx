@@ -28,7 +28,8 @@ export function OnboardingView(props: {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  const hasGeminiKey = !!props.setupStatus?.hasGeminiKey
+  const hasGeminiAccess = !!props.setupStatus?.geminiAccess.available
+  const geminiAccessSource = props.setupStatus?.geminiAccess.source ?? null
   const captureStatus = props.setupStatus?.captureAccess.status ?? 'unknown'
   const captureMessage = props.setupStatus?.captureAccess.message ?? null
 
@@ -113,7 +114,7 @@ export function OnboardingView(props: {
               </div>
               <div className="onboardingPromise">
                 <span aria-hidden="true">✓</span>
-                <div><strong>AI is optional</strong><small>Add your own Gemini key for summaries, Ask, and journal drafts.</small></div>
+                <div><strong>AI is optional</strong><small>Link CPAAutomation or add your own Gemini key for summaries, Ask, and journal drafts.</small></div>
               </div>
             </div>
           </div>
@@ -121,9 +122,13 @@ export function OnboardingView(props: {
 
         {step === 'gemini' ? (
           <div className="onboardingBody">
-            <div className="sideTitle">Gemini API key</div>
+            <div className="sideTitle">Gemini access</div>
             <div className="sideMeta">
-              Status: {hasGeminiKey ? 'configured' : 'missing'}. The key is stored in your OS credential store.
+              {geminiAccessSource === 'cpaautomation'
+                ? 'Provided by your linked CPAAutomation account. Your personal API key is not used while linked.'
+                : hasGeminiAccess
+                  ? 'Using your personal API key stored in the OS credential store.'
+                  : 'Link CPAAutomation in Settings, or add a personal API key below.'}
             </div>
 
             <div className="row" style={{ marginTop: 10 }}>
@@ -161,7 +166,7 @@ export function OnboardingView(props: {
             ) : null}
 
             <div className="sideMeta" style={{ marginTop: 12 }}>
-              You can record without a key, but analysis will stay pending until one is configured.
+              You can record without Gemini access, but analysis will stay pending until CPAAutomation is linked or a key is configured.
             </div>
           </div>
         ) : null}
@@ -208,7 +213,13 @@ export function OnboardingView(props: {
             <div className="onboardingList">
               <div className="row">
                 <div className="pill">Gemini</div>
-                <div className="sideMeta">{hasGeminiKey ? 'Configured' : 'Missing (analysis paused)'}</div>
+                <div className="sideMeta">
+                  {geminiAccessSource === 'cpaautomation'
+                    ? 'Provided by CPAAutomation'
+                    : hasGeminiAccess
+                      ? 'Personal key configured'
+                      : 'Missing (analysis paused)'}
+                </div>
               </div>
               {isMac ? (
                 <div className="row">

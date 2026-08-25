@@ -1,7 +1,6 @@
 import fs from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
-import { getGeminiApiKey } from './keychain'
 import type { Logger } from '../logger'
 import type { StorageService } from '../storage/storage'
 import { buildCompressedTimelineVideo } from './video'
@@ -13,6 +12,7 @@ import {
   buildTranscriptionResponseSchema,
   type JsonSchema
 } from './schemas'
+import { resolveGeminiRequest, type GeminiAccessSource } from './transport'
 
 export type GeminiConfig = {
   model: string
@@ -72,11 +72,6 @@ export class GeminiService {
   }): Promise<{ observationsInserted: number }>{
     const cfg = await this.resolveConfig()
     const settings = this.settings ? await this.settings.getAll() : null
-    const apiKey = await getGeminiApiKey()
-    if (!apiKey && !process.env.CHRONA_GEMINI_MOCK) {
-      throw new Error('Missing Gemini API key (set CHRONA_GEMINI_API_KEY or store via keychain)')
-    }
-
     if (process.env.CHRONA_GEMINI_MOCK) {
       const mockJson = JSON.stringify({
         observations: [
@@ -113,10 +108,6 @@ export class GeminiService {
 
       const videoBytes = await fs.readFile(videoPath)
       const videoBase64 = videoBytes.toString('base64')
-      const url = `https://generativelanguage.googleapis.com/v1beta/models/${cfg.model}:generateContent?key=${encodeURIComponent(
-        apiKey!
-      )}`
-
       const prompt = buildTranscriptionPrompt({
         screenshotIntervalSeconds: opts.screenshotIntervalSeconds,
         preamble: settings?.promptPreambleTranscribe ?? ''
@@ -144,13 +135,21 @@ export class GeminiService {
         }
       }
 
+      const request = await resolveGeminiRequest({
+        settings: this.settings,
+        model: cfg.model,
+        requestBody
+      })
+
       const callGroupId = `batch:${opts.batchId}:transcribe:${Date.now()}`
 
       const { text, latencyMs, httpStatus } = await this.fetchWithRetry({
         cfg,
-        url,
+        url: request.url,
         method: 'POST',
-        body: JSON.stringify(requestBody),
+        headers: request.headers,
+        body: request.body,
+        accessSource: request.source,
         callGroupId,
         batchId: opts.batchId,
         model: cfg.model,
@@ -179,7 +178,7 @@ export class GeminiService {
         latencyMs,
         httpStatus,
         requestMethod: 'POST',
-        requestUrl: redactKeyInUrl(url),
+        requestUrl: redactKeyInUrl(request.url),
         requestBody: cfg.logBodies ? JSON.stringify(requestBody) : null,
         responseBody: cfg.logBodies ? stripCodeFences(extracted) : null
       })
@@ -257,11 +256,6 @@ export class GeminiService {
       const allowed = allowedSubcategoriesByCategory[category]
       if (!allowed.includes(subcategory.name)) allowed.push(subcategory.name)
     }
-    const apiKey = await getGeminiApiKey()
-    if (!apiKey && !process.env.CHRONA_GEMINI_MOCK) {
-      throw new Error('Missing Gemini API key (set CHRONA_GEMINI_API_KEY or store via keychain)')
-    }
-
     if (process.env.CHRONA_GEMINI_MOCK) {
       const endTs = Math.max(opts.windowStartTs + 60, opts.windowEndTs - 60)
       const startTs = Math.max(opts.windowStartTs, endTs - 15 * 60)
@@ -302,10 +296,6 @@ export class GeminiService {
       }
     }
 
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${cfg.model}:generateContent?key=${encodeURIComponent(
-      apiKey!
-    )}`
-
     const prompt = buildCardGenerationPrompt({
       windowStartTs: opts.windowStartTs,
       windowEndTs: opts.windowEndTs,
@@ -329,13 +319,21 @@ export class GeminiService {
       }
     }
 
+    const request = await resolveGeminiRequest({
+      settings: this.settings,
+      model: cfg.model,
+      requestBody
+    })
+
     const callGroupId = `batch:${opts.batchId}:generate_cards:${Date.now()}`
 
     const { text, latencyMs, httpStatus } = await this.fetchWithRetry({
       cfg,
-      url,
+      url: request.url,
       method: 'POST',
-      body: JSON.stringify(requestBody),
+      headers: request.headers,
+      body: request.body,
+      accessSource: request.source,
       callGroupId,
       batchId: opts.batchId,
       model: cfg.model,
@@ -365,7 +363,7 @@ export class GeminiService {
       latencyMs,
       httpStatus,
       requestMethod: 'POST',
-      requestUrl: redactKeyInUrl(url),
+      requestUrl: redactKeyInUrl(request.url),
       requestBody: cfg.logBodies ? JSON.stringify(requestBody) : null,
       responseBody: cfg.logBodies ? extracted : null
     })
@@ -393,18 +391,9 @@ export class GeminiService {
     responseJsonSchema?: JsonSchema | null
   }): Promise<string> {
     const cfg = await this.resolveConfig()
-    const apiKey = await getGeminiApiKey()
-    if (!apiKey && !process.env.CHRONA_GEMINI_MOCK) {
-      throw new Error('Missing Gemini API key (set CHRONA_GEMINI_API_KEY or store via keychain)')
-    }
-
     if (process.env.CHRONA_GEMINI_MOCK) {
       return opts.mockJson
     }
-
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${cfg.model}:generateContent?key=${encodeURIComponent(
-      apiKey!
-    )}`
 
     const requestBody = {
       contents: [{ role: 'user', parts: [{ text: opts.prompt }] }],
@@ -419,11 +408,19 @@ export class GeminiService {
       }
     }
 
+    const request = await resolveGeminiRequest({
+      settings: this.settings,
+      model: cfg.model,
+      requestBody
+    })
+
     const { text } = await this.fetchWithRetry({
       cfg,
-      url,
+      url: request.url,
       method: 'POST',
-      body: JSON.stringify(requestBody),
+      headers: request.headers,
+      body: request.body,
+      accessSource: request.source,
       callGroupId: opts.callGroupId,
       batchId: opts.batchId ?? null,
       model: cfg.model,
@@ -436,20 +433,9 @@ export class GeminiService {
   async testApiKey(opts?: { apiKeyOverride?: string | null }): Promise<{ ok: boolean; message: string }> {
     const cfg = await this.resolveConfig()
 
-    const override = (opts?.apiKeyOverride ?? null)?.trim() || null
-    const apiKey = override ?? (await getGeminiApiKey())
-
-    if (!apiKey && !process.env.CHRONA_GEMINI_MOCK) {
-      return { ok: false, message: 'No Gemini API key configured' }
-    }
-
     if (process.env.CHRONA_GEMINI_MOCK) {
       return { ok: true, message: 'CHRONA_GEMINI_MOCK is set (skipping real request)' }
     }
-
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${cfg.model}:generateContent?key=${encodeURIComponent(
-      apiKey!
-    )}`
 
     const requestBody = {
       contents: [
@@ -466,11 +452,20 @@ export class GeminiService {
     const callGroupId = `test_key:${Date.now()}`
 
     try {
+      const override = (opts?.apiKeyOverride ?? null)?.trim() || null
+      const request = await resolveGeminiRequest({
+        settings: this.settings,
+        model: cfg.model,
+        requestBody,
+        ...(override ? { apiKeyOverride: override } : {})
+      })
       const { text, httpStatus } = await this.fetchWithRetry({
         cfg,
-        url,
+        url: request.url,
         method: 'POST',
-        body: JSON.stringify(requestBody),
+        headers: request.headers,
+        body: request.body,
+        accessSource: request.source,
         callGroupId,
         batchId: null,
         model: cfg.model,
@@ -479,7 +474,13 @@ export class GeminiService {
 
       const extracted = extractGeminiText(text).trim()
       if (extracted.toLowerCase().includes('ok')) {
-        return { ok: true, message: 'Key verified' }
+        return {
+          ok: true,
+          message:
+            request.source === 'cpaautomation'
+              ? 'CPAAutomation Gemini access verified'
+              : 'Key verified'
+        }
       }
       return { ok: true, message: `Received response (HTTP ${httpStatus})` }
     } catch (e) {
@@ -492,7 +493,9 @@ export class GeminiService {
     cfg: GeminiConfig
     url: string
     method: string
+    headers: Record<string, string>
     body: string
+    accessSource: GeminiAccessSource
     callGroupId: string
     batchId: number | null
     model: string
@@ -508,9 +511,7 @@ export class GeminiService {
 
         const res = await fetch(opts.url, {
           method: opts.method,
-          headers: {
-            'content-type': 'application/json'
-          },
+          headers: opts.headers,
           body: opts.body,
           signal: controller.signal
         }).finally(() => clearTimeout(t))
@@ -543,7 +544,8 @@ export class GeminiService {
         })
 
         if (!res.ok) {
-          throw new Error(`Gemini HTTP ${res.status}: ${summarizeErrorBody(text)}`)
+          const service = opts.accessSource === 'cpaautomation' ? 'CPAAutomation Gemini' : 'Gemini'
+          throw new Error(`${service} HTTP ${res.status}: ${summarizeErrorBody(text)}`)
         }
 
         return { text, latencyMs, httpStatus: res.status }

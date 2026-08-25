@@ -78,6 +78,7 @@ export function SettingsView(props: {
   onToggleAutoStartEnabled: (enabled: boolean) => Promise<void>
 
   hasGeminiKey: boolean | null
+  geminiAccessSource: 'cpaautomation' | 'api_key' | null
   geminiKeyInput: string
   setGeminiKeyInput: (s: string) => void
   onSaveGeminiKey: () => Promise<void>
@@ -983,12 +984,18 @@ export function SettingsView(props: {
         {active === 'intelligence' ? (
           <div className="settingsSection">
             <div className="sideTitle">AI (Gemini)</div>
-            <div className="sideMeta">Configure the Gemini API key, model, and runtime options.</div>
+            <div className="sideMeta">Configure Gemini access, model, and runtime options.</div>
 
             <div className="block">
-              <div className="sideTitle">API key</div>
+              <div className="sideTitle">Gemini access</div>
               <div className="sideMeta">
-                Key: {props.hasGeminiKey === null ? '...' : props.hasGeminiKey ? 'configured' : 'missing'}
+                {props.hasGeminiKey === null
+                  ? 'Checking…'
+                  : props.geminiAccessSource === 'cpaautomation'
+                    ? 'Provided by your linked CPAAutomation account. Your personal API key is not used while linked.'
+                    : props.hasGeminiKey
+                      ? 'Using your personal API key.'
+                      : 'Link CPAAutomation or add a personal API key.'}
               </div>
               <div className="row">
                 <input

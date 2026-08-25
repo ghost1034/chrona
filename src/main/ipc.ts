@@ -7,6 +7,7 @@ import { app, shell } from 'electron'
 import type { AnalysisService } from './analysis/analysis'
 import { getGeminiApiKey, setGeminiApiKey } from './gemini/keychain'
 import { GeminiService } from './gemini/gemini'
+import { getGeminiAccessStatus } from './gemini/transport'
 import { clipboard, dialog } from 'electron'
 import {
   formatDayForClipboard,
@@ -107,14 +108,18 @@ export function registerIpc(opts: {
   })
 
   handle('setup:getStatus', async () => {
-    const k = await getGeminiApiKey()
+    const geminiAccess = await getGeminiAccessStatus()
     const captureAccess =
       process.platform === 'darwin'
         ? await opts.capture.probeAccess()
         : { status: 'not_applicable' as const, message: null }
     return {
       platform: process.platform,
-      hasGeminiKey: !!k,
+      hasGeminiKey: geminiAccess.hasApiKey,
+      geminiAccess: {
+        available: geminiAccess.available,
+        source: geminiAccess.source
+      },
       captureAccess
     }
   })
@@ -196,6 +201,11 @@ export function registerIpc(opts: {
 
   handle('gemini:setApiKey', async (req) => {
     await setGeminiApiKey(req.apiKey)
+    void opts.analysis.runTickNow().catch((e) => {
+      opts.log.warn('analysis.resumeAfterGeminiAccessFailed', {
+        message: e instanceof Error ? e.message : String(e)
+      })
+    })
     return { ok: true }
   })
   handle('gemini:hasApiKey', async () => {
@@ -506,9 +516,15 @@ export function registerIpc(opts: {
   })
 
   handle('sync:getStatus', async () => opts.sync.getStatus())
-  handle('sync:pair', async (req) =>
-    opts.sync.pair({ code: req.code, endpoint: req.endpoint })
-  )
+  handle('sync:pair', async (req) => {
+    const status = await opts.sync.pair({ code: req.code, endpoint: req.endpoint })
+    void opts.analysis.runTickNow().catch((e) => {
+      opts.log.warn('analysis.resumeAfterGeminiAccessFailed', {
+        message: e instanceof Error ? e.message : String(e)
+      })
+    })
+    return status
+  })
   handle('sync:unpair', async () => opts.sync.unpair())
   handle('sync:runNow', async () => opts.sync.runNow())
   handle('sync:setEnabled', async (req) => opts.sync.setEnabled(!!req.enabled))

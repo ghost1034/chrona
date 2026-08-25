@@ -30,7 +30,7 @@ Feel free to! This won't stay a solo hackathon project forever.
 Chrona is a local-first, cross-platform Electron desktop app that turns passive screen captures into a structured timeline. It:
 
 - **Captures screenshots on a configurable interval** and stores everything locally. Nothing leaves your machine until Gemini analysis.
-- **Batches screenshots into compressed videos** and sends them to **Gemini's native multimodal video understanding** to generate time-aligned observations, then synthesizes those into structured timeline cards (title, category, summary, details, extracted sites).
+- **Batches screenshots into compressed videos** and sends them to **Gemini's native multimodal video understanding** to generate time-aligned observations, then synthesizes those into structured timeline cards (title, category, summary, details, extracted sites). Linked users send these requests through CPAAutomation; unlinked users can use their own Gemini API key.
 - **Renders a "logical day" timeline (4 AM to 4 AM by default)** with smooth zoom, full-text search powered by SQLite FTS5, category/tag filters, and multi-format exports (Markdown, CSV, XLSX).
 - **Includes a Review workflow** where you rate time blocks as focused, neutral, or distracted, with coverage tracking so you know what you've reflected on and what you haven't.
 - **Provides an Ask chat** that answers natural-language questions based on your timeline data, with clickable source references that jump directly to the relevant cards. Every response is evidence-backed.
@@ -43,7 +43,7 @@ Chrona's architecture is a pipeline with strict boundaries between capture, stor
 
 1. **Capture (main process).** Electron's `desktopCapturer` API saves timestamped JPEGs locally on a configurable interval, with permission detection and automatic failure handling.
 2. **Storage.** SQLite manages all persistent data (screenshots, batches, observations, timeline cards, review segments, journal entries) with FTS5 indexes for fast full-text search and a fallback path for environments where FTS5 isn't available.
-3. **Analysis (Gemini 3 Preview or 2.5).** A batching engine groups screenshots by time window, compresses them into video, and sends them to **Gemini's native video understanding** to produce observations. Gemini then synthesizes observations into structured timeline cards with enforced JSON schemas and source IDs, keeping every output testable.
+3. **Analysis (Gemini 3 Preview or 2.5).** A batching engine groups screenshots by time window, compresses them into video, and sends them to **Gemini's native video understanding** to produce observations. Requests use a linked CPAAutomation account when available and otherwise fall back to the user's Gemini API key. Gemini then synthesizes observations into structured timeline cards with enforced JSON schemas and source IDs, keeping every output testable.
 4. **Renderer UI.** A React frontend renders the timeline, search, review, dashboard, Ask chat, and journal. All communication with the main process flows through typed IPC channels for safety and maintainability.
 
 ## Challenges I faced
